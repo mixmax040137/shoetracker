@@ -105,11 +105,15 @@
 
       <section class="settings-card">
         <h3>ข้อมูลของคุณ</h3>
-        <p class="muted">ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์นี้เท่านั้น (localStorage) ยังไม่ซิงค์ข้ามอุปกรณ์</p>
+        <p class="muted">ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์นี้เท่านั้น (localStorage) ยังไม่ซิงค์ข้ามอุปกรณ์ —
+        "นำเข้า/กู้คืน" จะรวมข้อมูลจากไฟล์เข้ากับที่มีอยู่ โดยไม่เพิ่มรายการซ้ำ</p>
         <div class="btn-row">
           <button id="exportDataBtn" class="ghost-btn">ส่งออกข้อมูล (JSON)</button>
+          <button id="importDataBtn" class="ghost-btn">นำเข้า/กู้คืนข้อมูล (JSON)</button>
           <button id="clearDataBtn" class="ghost-btn danger">ล้างข้อมูลทั้งหมด</button>
         </div>
+        <input type="file" id="importDataInput" accept="application/json,.json" style="display:none">
+        <p class="hint" id="importResult"></p>
       </section>
     </div>
   </main>

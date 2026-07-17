@@ -701,6 +701,87 @@ function exportData() {
   URL.revokeObjectURL(url);
 }
 
+/* นำเข้า/กู้คืนข้อมูลจากไฟล์ JSON — รวมกับข้อมูลเดิม จับคู่รองเท้าตามชื่อ
+   และกันรายการวิ่งซ้ำด้วย externalId (โครงสร้างเดียวกับไฟล์ที่ปุ่ม "ส่งออก" สร้าง) */
+function restoreFromJson(obj) {
+  if (!obj || !Array.isArray(obj.shoes) || !Array.isArray(obj.runs)) {
+    throw new Error("ไฟล์ไม่ถูกต้อง (ต้องมี shoes และ runs)");
+  }
+  const nameToId = {};
+  state.data.shoes.forEach((s) => {
+    nameToId[s.name.toLowerCase()] = s.id;
+  });
+
+  const idMap = {};
+  let addedShoes = 0;
+  obj.shoes.forEach((inS) => {
+    const key = (inS.name || "").toLowerCase();
+    if (!key) return;
+    if (nameToId[key]) {
+      idMap[inS.id] = nameToId[key];
+    } else {
+      const newShoe = {
+        id: uid(),
+        name: inS.name,
+        brand: inS.brand || "",
+        category: inS.category || "ถนน",
+        startingDistanceKm: Number(inS.startingDistanceKm) || 0,
+        photo: inS.photo || null,
+        isRetired: !!inS.isRetired,
+        dateAdded: inS.dateAdded || new Date().toISOString(),
+      };
+      state.data.shoes.push(newShoe);
+      nameToId[key] = newShoe.id;
+      idMap[inS.id] = newShoe.id;
+      addedShoes++;
+    }
+  });
+
+  const existingExt = new Set(state.data.runs.map((r) => r.externalId).filter(Boolean));
+  let addedRuns = 0;
+  obj.runs.forEach((inR) => {
+    if (inR.externalId && existingExt.has(inR.externalId)) return;
+    state.data.runs.push({
+      id: uid(),
+      shoeId: inR.shoeId != null ? idMap[inR.shoeId] || null : null,
+      date: inR.date,
+      distanceKm: Number(inR.distanceKm) || 0,
+      durationMinutes: inR.durationMinutes != null ? Number(inR.durationMinutes) : null,
+      notes: inR.notes || null,
+      source: inR.source || "manual",
+      externalId: inR.externalId || null,
+      createdAt: new Date().toISOString(),
+    });
+    if (inR.externalId) existingExt.add(inR.externalId);
+    addedRuns++;
+  });
+  return { addedShoes, addedRuns };
+}
+
+function handleDataImport(file) {
+  const resultEl = document.getElementById("importResult");
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(String(reader.result));
+      const { addedShoes, addedRuns } = restoreFromJson(obj);
+      if (!saveData()) return;
+      renderShoeList();
+      renderDetail();
+      renderSettingsCsvOptions();
+      resultEl.textContent =
+        `นำเข้าสำเร็จ: เพิ่มรองเท้า ${addedShoes} คู่, การวิ่ง ${addedRuns} รายการ` +
+        (addedShoes === 0 && addedRuns === 0 ? " (ข้อมูลนี้มีอยู่แล้ว ไม่มีรายการซ้ำถูกเพิ่ม)" : "");
+    } catch (err) {
+      resultEl.textContent = "นำเข้าไม่สำเร็จ: " + err.message;
+    }
+  };
+  reader.onerror = () => {
+    resultEl.textContent = "อ่านไฟล์ไม่สำเร็จ";
+  };
+  reader.readAsText(file);
+}
+
 function clearAllData() {
   if (!confirm("ลบข้อมูลรองเท้าและการวิ่งทั้งหมดในเบราว์เซอร์นี้หรือไม่? ทำย้อนกลับไม่ได้")) return;
   state.data = { shoes: [], runs: [] };
@@ -796,6 +877,14 @@ function bindEvents() {
   });
 
   document.getElementById("exportDataBtn").addEventListener("click", exportData);
+  document.getElementById("importDataBtn").addEventListener("click", () => {
+    document.getElementById("importDataInput").click();
+  });
+  document.getElementById("importDataInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) handleDataImport(file);
+    e.target.value = "";
+  });
   document.getElementById("clearDataBtn").addEventListener("click", clearAllData);
 }
 
