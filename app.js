@@ -28,7 +28,46 @@ function loadData() {
 }
 
 function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+    return true;
+  } catch (e) {
+    alert(
+      "บันทึกไม่สำเร็จ: พื้นที่จัดเก็บในเบราว์เซอร์เต็ม " +
+        "(มักเกิดจากรูปภาพขนาดใหญ่หรือมีหลายรูป) ลองลบรูปบางรูปหรือข้อมูลเก่าออกแล้วลองใหม่"
+    );
+    return false;
+  }
+}
+
+/* ย่อรูปด้วย canvas ก่อนเก็บ เพื่อไม่ให้ localStorage เต็มเร็ว */
+function resizeImageToDataURL(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("อ่านไฟล์ไม่สำเร็จ"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("ไฟล์รูปไม่ถูกต้อง"));
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > height && width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else if (height >= width && height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function uid() {
@@ -59,6 +98,7 @@ const state = {
   currentTab: "shoes",
   selectedShoeId: null,
   editingShoeId: null, // null = กำลังเพิ่มใหม่
+  editingPhoto: null, // รูปที่กำลังแก้ในโมดัล (data URL) หรือ null
   runTargetShoeId: null,
 };
 
@@ -102,11 +142,15 @@ function renderShoeList() {
 
 function shoeCardHtml(shoe) {
   const selected = shoe.id === state.selectedShoeId ? "selected" : "";
+  const thumb = shoe.photo ? `<img class="shoe-thumb" src="${shoe.photo}" alt="">` : "";
   return `
     <div class="shoe-card ${selected}" data-id="${shoe.id}">
-      <div>
-        <div class="name">${escapeHtml(shoe.name)}</div>
-        ${shoe.brand ? `<div class="brand">${escapeHtml(shoe.brand)}</div>` : ""}
+      <div class="shoe-card-left">
+        ${thumb}
+        <div>
+          <div class="name">${escapeHtml(shoe.name)}</div>
+          ${shoe.brand ? `<div class="brand">${escapeHtml(shoe.brand)}</div>` : ""}
+        </div>
       </div>
       <div class="distance">${totalDistance(shoe).toFixed(0)} กม.</div>
     </div>`;
@@ -137,6 +181,16 @@ function renderDetail() {
     .filter(Boolean)
     .join(" · ");
   document.getElementById("detailTotal").textContent = `${totalDistance(shoe).toFixed(1)} กิโลเมตร`;
+
+  const detailPhoto = document.getElementById("detailPhoto");
+  if (shoe.photo) {
+    detailPhoto.src = shoe.photo;
+    detailPhoto.classList.remove("hidden");
+  } else {
+    detailPhoto.removeAttribute("src");
+    detailPhoto.classList.add("hidden");
+  }
+
   document.getElementById("retireShoeBtn").textContent = shoe.isRetired
     ? "ยกเลิกการเลิกใช้งาน"
     : "ทำเครื่องหมายเลิกใช้งาน";
@@ -193,7 +247,23 @@ function openShoeModal(shoeId) {
   document.getElementById("shoeCategoryInput").value = shoe ? shoe.category : "ถนน";
   document.getElementById("shoeStartInput").value = shoe ? shoe.startingDistanceKm : 0;
 
+  state.editingPhoto = shoe && shoe.photo ? shoe.photo : null;
+  document.getElementById("shoePhotoInput").value = "";
+  updateShoePhotoPreview();
+
   document.getElementById("shoeModal").classList.remove("hidden");
+}
+
+function updateShoePhotoPreview() {
+  const wrap = document.getElementById("shoePhotoPreview");
+  const img = document.getElementById("shoePhotoImg");
+  if (state.editingPhoto) {
+    img.src = state.editingPhoto;
+    wrap.classList.remove("hidden");
+  } else {
+    img.removeAttribute("src");
+    wrap.classList.add("hidden");
+  }
 }
 
 function closeShoeModal() {
@@ -212,7 +282,7 @@ function saveShoeFromModal() {
 
   if (state.editingShoeId) {
     const shoe = state.data.shoes.find((s) => s.id === state.editingShoeId);
-    Object.assign(shoe, { name, brand, category, startingDistanceKm });
+    Object.assign(shoe, { name, brand, category, startingDistanceKm, photo: state.editingPhoto });
   } else {
     state.data.shoes.push({
       id: uid(),
@@ -220,6 +290,7 @@ function saveShoeFromModal() {
       brand,
       category,
       startingDistanceKm,
+      photo: state.editingPhoto,
       isRetired: false,
       dateAdded: new Date().toISOString(),
     });
@@ -653,6 +724,22 @@ function bindEvents() {
   document.getElementById("addShoeBtn").addEventListener("click", () => openShoeModal(null));
   document.getElementById("shoeModalCancel").addEventListener("click", closeShoeModal);
   document.getElementById("shoeModalSave").addEventListener("click", saveShoeFromModal);
+
+  document.getElementById("shoePhotoInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      state.editingPhoto = await resizeImageToDataURL(file, 640, 0.82);
+      updateShoePhotoPreview();
+    } catch (err) {
+      alert("ใช้รูปนี้ไม่ได้: " + err.message);
+    }
+  });
+  document.getElementById("shoePhotoRemove").addEventListener("click", () => {
+    state.editingPhoto = null;
+    document.getElementById("shoePhotoInput").value = "";
+    updateShoePhotoPreview();
+  });
 
   document.getElementById("backBtn").addEventListener("click", backToList);
   document.getElementById("logRunBtn").addEventListener("click", () => openRunModal(state.selectedShoeId));

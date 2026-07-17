@@ -148,9 +148,22 @@ h1, h2, h3 { margin: 0; }
 }
 .shoe-card:hover { border-color: var(--accent); }
 .shoe-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.shoe-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .shoe-card .name { font-weight: 600; }
 .shoe-card .brand { font-size: 0.8rem; color: var(--muted); }
-.shoe-card .distance { color: var(--muted); font-variant-numeric: tabular-nums; }
+.shoe-card .distance { color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.shoe-thumb {
+  width: 44px; height: 44px; border-radius: 8px; object-fit: cover;
+  flex-shrink: 0; border: 1px solid var(--border); background: var(--surface);
+}
+.detail-photo {
+  width: 100%; max-height: 260px; object-fit: cover;
+  border-radius: 12px; margin: 12px 0 4px; border: 1px solid var(--border);
+}
+.photo-preview { margin-top: 10px; display: flex; align-items: center; gap: 12px; }
+.photo-preview img {
+  width: 72px; height: 72px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border);
+}
 
 .empty-list { color: var(--muted); padding: 20px 0; text-align: center; }
 

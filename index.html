@@ -61,6 +61,7 @@
               </div>
             </div>
           </div>
+          <img id="detailPhoto" class="detail-photo hidden" alt="รูปรองเท้า">
           <div class="total-distance" id="detailTotal"></div>
           <h3 class="section-label">ประวัติการวิ่ง</h3>
           <div id="runList" class="run-list"></div>
@@ -135,6 +136,13 @@
     <label>ระยะทางเริ่มต้น (กม.)
       <input type="number" id="shoeStartInput" min="0" step="0.1" value="0">
     </label>
+    <label>รูปรองเท้า (ถ้ามี)
+      <input type="file" id="shoePhotoInput" accept="image/*">
+    </label>
+    <div id="shoePhotoPreview" class="photo-preview hidden">
+      <img id="shoePhotoImg" alt="ตัวอย่างรูปรองเท้า">
+      <button type="button" id="shoePhotoRemove" class="ghost-btn danger">ลบรูป</button>
+    </div>
     <div class="modal-actions">
       <button id="shoeModalCancel" class="ghost-btn">ยกเลิก</button>
       <button id="shoeModalSave" class="primary-btn">บันทึก</button>
