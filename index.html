@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ShoeTracker — บันทึกระยะทางวิ่งของรองเท้า</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <h1>👟 ShoeTracker</h1>
+    <nav class="tabs" id="mainTabs">
+      <button class="tab-btn active" data-tab="shoes">รองเท้า</button>
+      <button class="tab-btn" data-tab="settings">ตั้งค่า</button>
+    </nav>
+  </header>
+
+  <!-- ===== แท็บรองเท้า ===== -->
+  <main class="tab-panel" id="panel-shoes">
+    <div class="master-detail" id="shoesLayout">
+
+      <section class="shoe-list-pane" id="listPane">
+        <div class="pane-header">
+          <h2>รองเท้าของคุณ</h2>
+          <button id="addShoeBtn" class="icon-btn" title="เพิ่มรองเท้า" aria-label="เพิ่มรองเท้า">+</button>
+        </div>
+
+        <button id="unassignedBanner" class="unassigned-banner hidden"></button>
+
+        <h3 class="section-label">ใช้งานอยู่</h3>
+        <div id="shoeListActive" class="shoe-list"></div>
+
+        <div id="retiredSection" class="hidden">
+          <h3 class="section-label">เลิกใช้แล้ว</h3>
+          <div id="shoeListRetired" class="shoe-list"></div>
+        </div>
+      </section>
+
+      <section class="shoe-detail-pane" id="detailPane">
+        <div class="empty-state" id="detailEmpty">
+          <p>เลือกรองเท้าทางซ้ายเพื่อดูรายละเอียด</p>
+        </div>
+        <div class="detail-content hidden" id="detailContent">
+          <button class="back-btn" id="backBtn">‹ กลับ</button>
+          <div class="detail-head">
+            <div>
+              <h2 id="detailName"></h2>
+              <p id="detailBrand" class="muted"></p>
+            </div>
+            <div class="detail-actions">
+              <button id="logRunBtn" class="primary-btn">+ บันทึกการวิ่ง</button>
+              <div class="menu-wrap">
+                <button id="detailMenuBtn" class="icon-btn" aria-label="เมนู">⋯</button>
+                <div id="detailMenu" class="menu hidden">
+                  <button id="editShoeBtn">แก้ไขรองเท้า</button>
+                  <button id="retireShoeBtn"></button>
+                  <button id="deleteShoeBtn" class="danger">ลบรองเท้า</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="total-distance" id="detailTotal"></div>
+          <h3 class="section-label">ประวัติการวิ่ง</h3>
+          <div id="runList" class="run-list"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== แท็บตั้งค่า ===== -->
+  <main class="tab-panel hidden" id="panel-settings">
+    <div class="settings-pane">
+      <h2>ตั้งค่า</h2>
+
+      <section class="settings-card">
+        <h3>Strava</h3>
+        <p class="muted" id="stravaStatus">ยังไม่ได้เชื่อมต่อ</p>
+        <div class="btn-row">
+          <button id="stravaConnectBtn" class="primary-btn">เชื่อมต่อ Strava</button>
+          <button id="stravaDisconnectBtn" class="ghost-btn danger hidden">ยกเลิกการเชื่อมต่อ</button>
+        </div>
+        <button id="stravaSyncBtn" class="ghost-btn hidden">ซิงค์ข้อมูลจาก Strava เดี๋ยวนี้</button>
+        <p class="error-text hidden" id="stravaError"></p>
+        <p class="hint">ต้องตั้งค่า Client ID และ Apps Script proxy ก่อนใช้งาน ดูวิธีใน <code>web-app/README.md</code></p>
+      </section>
+
+      <section class="settings-card">
+        <h3>Apple Health / Apple Fitness</h3>
+        <p class="muted">Apple ไม่เปิด HealthKit ให้เว็บเบราว์เซอร์เข้าถึงได้ จึงเชื่อมต่อโดยตรงจากเว็บไม่ได้ —
+        ใช้ได้เฉพาะในแอพ iOS เท่านั้น (โฟลเดอร์ <code>ios-app/</code>) หากมีข้อมูลอยู่แล้ว ให้ export ออกมาเป็น CSV แล้วนำเข้าด้านล่างแทนได้</p>
+      </section>
+
+      <section class="settings-card">
+        <h3>นำเข้าข้อมูลจากไฟล์ CSV</h3>
+        <p class="muted">คอลัมน์ที่รองรับ: <code>date</code> (วันที่ เช่น 2026-07-17), <code>distance_km</code>, <code>duration_min</code> (ไม่บังคับ), <code>notes</code> (ไม่บังคับ)</p>
+        <div class="btn-row">
+          <select id="csvShoeSelect"></select>
+          <input type="file" id="csvFileInput" accept=".csv,text/csv">
+        </div>
+        <p class="hint" id="csvResult"></p>
+      </section>
+
+      <section class="settings-card">
+        <h3>ข้อมูลของคุณ</h3>
+        <p class="muted">ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์นี้เท่านั้น (localStorage) ยังไม่ซิงค์ข้ามอุปกรณ์</p>
+        <div class="btn-row">
+          <button id="exportDataBtn" class="ghost-btn">ส่งออกข้อมูล (JSON)</button>
+          <button id="clearDataBtn" class="ghost-btn danger">ล้างข้อมูลทั้งหมด</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- ===== Modal: เพิ่ม/แก้ไขรองเท้า ===== -->
+<div id="shoeModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="shoeModalTitle">เพิ่มรองเท้า</h3>
+    <label>ชื่อรองเท้า
+      <input type="text" id="shoeNameInput" placeholder="เช่น ASICS Metaspeed Edge Tokyo">
+    </label>
+    <label>ยี่ห้อ (ถ้ามี)
+      <input type="text" id="shoeBrandInput" placeholder="เช่น ASICS">
+    </label>
+    <label>ประเภท
+      <select id="shoeCategoryInput">
+        <option value="ถนน">ถนน</option>
+        <option value="เทรล">เทรล</option>
+        <option value="แข่งขัน">แข่งขัน</option>
+        <option value="อื่นๆ">อื่นๆ</option>
+      </select>
+    </label>
+    <label>ระยะทางเริ่มต้น (กม.)
+      <input type="number" id="shoeStartInput" min="0" step="0.1" value="0">
+    </label>
+    <div class="modal-actions">
+      <button id="shoeModalCancel" class="ghost-btn">ยกเลิก</button>
+      <button id="shoeModalSave" class="primary-btn">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Modal: บันทึกการวิ่ง ===== -->
+<div id="runModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>บันทึกการวิ่ง</h3>
+    <label>วันและเวลา
+      <input type="datetime-local" id="runDateInput">
+    </label>
+    <label>ระยะทาง (กม.)
+      <input type="number" id="runDistanceInput" min="0" step="0.01" placeholder="0.0">
+    </label>
+    <label>เวลาที่ใช้ (นาที, ไม่บังคับ)
+      <input type="number" id="runDurationInput" min="0" step="1" placeholder="0">
+    </label>
+    <label>หมายเหตุ (ไม่บังคับ)
+      <input type="text" id="runNotesInput">
+    </label>
+    <div class="modal-actions">
+      <button id="runModalCancel" class="ghost-btn">ยกเลิก</button>
+      <button id="runModalSave" class="primary-btn">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Modal: การวิ่งที่ยังไม่ระบุรองเท้า ===== -->
+<div id="unassignedModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <h3>การวิ่งที่ยังไม่ระบุรองเท้า</h3>
+    <div id="unassignedList" class="run-list"></div>
+    <div class="modal-actions">
+      <button id="unassignedModalClose" class="ghost-btn">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

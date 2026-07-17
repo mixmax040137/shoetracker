@@ -1,0 +1,5 @@
+// คัดลอกไฟล์นี้เป็น Config.xcconfig แล้วใส่ค่าจริงของคุณ (Config.xcconfig จะไม่ถูกอัปโหลดขึ้น git)
+// สมัคร Strava API app ได้ที่ https://www.strava.com/settings/api
+
+STRAVA_CLIENT_ID =
+STRAVA_CLIENT_SECRET =

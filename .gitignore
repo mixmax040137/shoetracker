@@ -1,0 +1,10 @@
+.DS_Store
+Thumbs.db
+
+# Xcode / iOS (โปรเจกต์สร้างด้วย XcodeGen — ดู ios-app/ShoeTracker/.gitignore)
+*.xcodeproj
+ios-app/ShoeTracker/Generated/
+ios-app/ShoeTracker/Config.xcconfig
+xcuserdata/
+DerivedData/
+.build/
