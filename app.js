@@ -12,6 +12,12 @@ const CONFIG = {
 
 const STORAGE_KEY = "shoetracker_data_v1";
 const STRAVA_TOKEN_KEY = "shoetracker_strava_tokens_v1";
+const SYNC_ENDPOINT_KEY = "shoetracker_sync_endpoint";
+const SYNC_CODE_KEY = "shoetracker_sync_code";
+const SYNC_LAST_KEY = "shoetracker_sync_last";
+
+let cloudPushTimer = null;
+let suppressCloudPush = false; // กันไม่ให้ตอน "ดึงจากคลาวด์" แล้วเซฟ ไปสั่งสำรองซ้ำทันที
 
 /* ---------------------------------------------------------------
  * ชั้นข้อมูล (localStorage)
@@ -30,6 +36,7 @@ function loadData() {
 function saveData() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+    scheduleCloudPush();
     return true;
   } catch (e) {
     alert(
@@ -794,6 +801,115 @@ function clearAllData() {
 }
 
 /* ---------------------------------------------------------------
+ * ซิงค์ / สำรองข้อมูลออนไลน์ (ผ่าน Apps Script + Google Drive)
+ * ------------------------------------------------------------- */
+function getSyncConfig() {
+  return {
+    endpoint: (localStorage.getItem(SYNC_ENDPOINT_KEY) || "").trim(),
+    code: (localStorage.getItem(SYNC_CODE_KEY) || "").trim(),
+  };
+}
+
+function syncConfigured() {
+  const cfg = getSyncConfig();
+  return Boolean(cfg.endpoint && cfg.code);
+}
+
+function setSyncStatus(message, isError) {
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("sync-error", Boolean(isError));
+}
+
+function renderSyncStatus() {
+  if (!syncConfigured()) {
+    setSyncStatus("ยังไม่ได้ตั้งค่า — ใส่ Apps Script URL และรหัสซิงค์ให้ครบเพื่อเปิดใช้งาน");
+    return;
+  }
+  const last = localStorage.getItem(SYNC_LAST_KEY);
+  setSyncStatus(
+    last
+      ? "พร้อมซิงค์ · สำรองล่าสุด: " + new Date(last).toLocaleString("th-TH")
+      : "พร้อมซิงค์ · ยังไม่เคยสำรอง"
+  );
+}
+
+function scheduleCloudPush() {
+  if (suppressCloudPush || !syncConfigured()) return;
+  clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(pushToCloud, 1500);
+}
+
+async function pushToCloud() {
+  const cfg = getSyncConfig();
+  if (!cfg.endpoint || !cfg.code) return;
+  setSyncStatus("กำลังสำรองขึ้นคลาวด์…");
+  try {
+    const res = await fetch(cfg.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // เลี่ยง CORS preflight กับ Apps Script
+      body: JSON.stringify({ action: "save", syncCode: cfg.code, data: state.data }),
+    });
+    const json = await res.json();
+    if (json.status !== "ok") throw new Error(json.message || "สำรองไม่สำเร็จ");
+    localStorage.setItem(SYNC_LAST_KEY, json.updatedAt || new Date().toISOString());
+    setSyncStatus("สำรองล่าสุด: " + new Date().toLocaleString("th-TH"));
+  } catch (err) {
+    setSyncStatus("สำรองไม่สำเร็จ: " + err.message, true);
+  }
+}
+
+async function pullFromCloud() {
+  const cfg = getSyncConfig();
+  if (!cfg.endpoint || !cfg.code) {
+    setSyncStatus("ยังไม่ได้ตั้งค่า Apps Script URL และรหัสซิงค์", true);
+    return;
+  }
+  setSyncStatus("กำลังดึงข้อมูลจากคลาวด์…");
+  try {
+    const res = await fetch(cfg.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "load", syncCode: cfg.code }),
+    });
+    const json = await res.json();
+    if (json.status !== "ok") throw new Error(json.message || "ดึงข้อมูลไม่สำเร็จ");
+
+    const cloud = json.data;
+    const hasData = cloud && ((cloud.shoes || []).length || (cloud.runs || []).length);
+    if (!hasData) {
+      setSyncStatus("ยังไม่มีข้อมูลบนคลาวด์สำหรับรหัสนี้ (ลองกด “สำรองขึ้นคลาวด์” จากเครื่องที่มีข้อมูลก่อน)", true);
+      return;
+    }
+
+    suppressCloudPush = true;
+    state.data = { shoes: cloud.shoes || [], runs: cloud.runs || [] };
+    saveData();
+    suppressCloudPush = false;
+
+    state.selectedShoeId = null;
+    backToList();
+    renderShoeList();
+    renderDetail();
+    renderSettingsCsvOptions();
+    localStorage.setItem(SYNC_LAST_KEY, json.updatedAt || new Date().toISOString());
+    setSyncStatus("ดึงข้อมูลจากคลาวด์สำเร็จ · อัปเดตเมื่อ " + new Date().toLocaleString("th-TH"));
+  } catch (err) {
+    setSyncStatus("ดึงไม่สำเร็จ: " + err.message, true);
+  }
+}
+
+function generateSyncCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  const arr = new Uint32Array(20);
+  (window.crypto || window.msCrypto).getRandomValues(arr);
+  for (let i = 0; i < arr.length; i++) code += chars[arr[i] % chars.length];
+  return code;
+}
+
+/* ---------------------------------------------------------------
  * ผูก event ทั้งหมด
  * ------------------------------------------------------------- */
 function bindEvents() {
@@ -886,6 +1002,63 @@ function bindEvents() {
     e.target.value = "";
   });
   document.getElementById("clearDataBtn").addEventListener("click", clearAllData);
+
+  // ---- ซิงค์ออนไลน์ ----
+  const endpointInput = document.getElementById("syncEndpointInput");
+  const codeInput = document.getElementById("syncCodeInput");
+  endpointInput.addEventListener("input", () => {
+    localStorage.setItem(SYNC_ENDPOINT_KEY, endpointInput.value.trim());
+    renderSyncStatus();
+  });
+  codeInput.addEventListener("input", () => {
+    localStorage.setItem(SYNC_CODE_KEY, codeInput.value.trim());
+    renderSyncStatus();
+  });
+  document.getElementById("syncGenCodeBtn").addEventListener("click", () => {
+    const code = generateSyncCode();
+    codeInput.value = code;
+    localStorage.setItem(SYNC_CODE_KEY, code);
+    renderSyncStatus();
+  });
+  document.getElementById("syncCopyCodeBtn").addEventListener("click", () => {
+    const code = codeInput.value.trim();
+    if (!code) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code);
+    }
+    setSyncStatus("คัดลอกรหัสซิงค์แล้ว — เก็บไว้ให้ดีเหมือนรหัสผ่าน");
+  });
+  document.getElementById("syncPushBtn").addEventListener("click", () => {
+    if (!syncConfigured()) {
+      setSyncStatus("ใส่ Apps Script URL และรหัสซิงค์ให้ครบก่อน", true);
+      return;
+    }
+    pushToCloud();
+  });
+  document.getElementById("syncPullBtn").addEventListener("click", () => {
+    if (!syncConfigured()) {
+      setSyncStatus("ใส่ Apps Script URL และรหัสซิงค์ให้ครบก่อน", true);
+      return;
+    }
+    const hasLocal = state.data.shoes.length || state.data.runs.length;
+    if (hasLocal && !confirm("การดึงจากคลาวด์จะแทนที่ข้อมูลในเบราว์เซอร์นี้ทั้งหมด ต้องการทำต่อหรือไม่?")) {
+      return;
+    }
+    pullFromCloud();
+  });
+}
+
+function initSyncUI() {
+  const cfg = getSyncConfig();
+  document.getElementById("syncEndpointInput").value = cfg.endpoint;
+  document.getElementById("syncCodeInput").value = cfg.code;
+  renderSyncStatus();
+
+  // เบราว์เซอร์ใหม่ (ยังไม่มีข้อมูลในเครื่อง) + ตั้งค่าซิงค์ไว้แล้ว → ดึงข้อมูลให้อัตโนมัติ
+  const localEmpty = !state.data.shoes.length && !state.data.runs.length;
+  if (syncConfigured() && localEmpty) {
+    pullFromCloud();
+  }
 }
 
 /* ---------------------------------------------------------------
@@ -897,6 +1070,7 @@ async function init() {
   renderDetail();
   renderSettingsCsvOptions();
   renderStravaStatus();
+  initSyncUI();
   await handleStravaRedirectIfPresent();
 }
 

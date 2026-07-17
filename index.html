@@ -115,6 +115,29 @@
         <input type="file" id="importDataInput" accept="application/json,.json" style="display:none">
         <p class="hint" id="importResult"></p>
       </section>
+
+      <section class="settings-card">
+        <h3>ซิงค์ / สำรองข้อมูลออนไลน์</h3>
+        <p class="muted">สำรองข้อมูลขึ้น Google Drive ของคุณเองผ่าน Apps Script เมื่อตั้งค่าแล้ว
+        แอพจะสำรองให้อัตโนมัติทุกครั้งที่ข้อมูลเปลี่ยน เปิดเบราว์เซอร์/เครื่องอื่นแล้วใส่
+        <b>รหัสซิงค์เดียวกัน</b> ก็จะได้ข้อมูลชุดเดียวกัน (ดูวิธีตั้งค่าใน <code>apps-script/SyncBackend.gs</code>)</p>
+
+        <label class="field-label">Apps Script URL
+          <input type="text" id="syncEndpointInput" placeholder="https://script.google.com/macros/s/.../exec">
+        </label>
+        <label class="field-label">รหัสซิงค์ (ใช้รหัสเดียวกันทุกเครื่อง)
+          <input type="text" id="syncCodeInput" placeholder="กด “สร้างรหัสใหม่” หรือวางรหัสจากเครื่องเดิม">
+        </label>
+        <div class="btn-row">
+          <button id="syncGenCodeBtn" class="ghost-btn">สร้างรหัสใหม่</button>
+          <button id="syncCopyCodeBtn" class="ghost-btn">คัดลอกรหัส</button>
+        </div>
+        <div class="btn-row">
+          <button id="syncPushBtn" class="primary-btn">สำรองขึ้นคลาวด์เดี๋ยวนี้</button>
+          <button id="syncPullBtn" class="ghost-btn">ดึงจากคลาวด์ (แทนที่ข้อมูลในเครื่อง)</button>
+        </div>
+        <p class="hint" id="syncStatus"></p>
+      </section>
     </div>
   </main>
 </div>
