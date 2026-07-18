@@ -190,9 +190,46 @@
     <label>เวลาที่ใช้ (นาที, ไม่บังคับ)
       <input type="number" id="runDurationInput" min="0" step="1" placeholder="0">
     </label>
+    <label>ประเภทการวิ่ง
+      <select id="runTypeInput">
+        <option value="">— ไม่ระบุ —</option>
+        <option value="วิ่งเบา">วิ่งเบา (Easy)</option>
+        <option value="เทมโป">เทมโป (Tempo)</option>
+        <option value="อินเทอร์วัล">อินเทอร์วัล (Interval)</option>
+        <option value="วิ่งยาว">วิ่งยาว (Long run)</option>
+        <option value="แข่ง">แข่ง (Race)</option>
+        <option value="ฟื้นฟู">ฟื้นฟู (Recovery)</option>
+        <option value="เทรล">เทรล (Trail)</option>
+      </select>
+    </label>
+    <label>สถานที่ (ไม่บังคับ)</label>
+    <div class="loc-row">
+      <input type="text" id="runLocationInput" placeholder="เช่น สวนลุมพินี">
+      <button type="button" id="runLocationBtn" class="ghost-btn" title="ใช้ตำแหน่งปัจจุบัน">📍</button>
+    </div>
+    <label>ความรู้สึกหลังวิ่ง
+      <select id="runFeelingInput">
+        <option value="">— ไม่ระบุ —</option>
+        <option value="5">😄 สุดยอด</option>
+        <option value="4">🙂 ดี</option>
+        <option value="3">😐 เฉยๆ</option>
+        <option value="2">😮‍💨 เหนื่อย</option>
+        <option value="1">🥵 หนักมาก</option>
+      </select>
+    </label>
+    <label>อัตราการเต้นหัวใจเฉลี่ย (bpm, ไม่บังคับ)
+      <input type="number" id="runHrInput" min="0" step="1" placeholder="เช่น 152">
+    </label>
     <label>หมายเหตุ (ไม่บังคับ)
       <input type="text" id="runNotesInput">
     </label>
+    <label>รูปภาพ (ไม่บังคับ)
+      <input type="file" id="runPhotoInput" accept="image/*">
+    </label>
+    <div id="runPhotoPreview" class="photo-preview hidden">
+      <img id="runPhotoImg" alt="ตัวอย่างรูปการวิ่ง">
+      <button type="button" id="runPhotoRemove" class="ghost-btn danger">ลบรูป</button>
+    </div>
     <div class="modal-actions">
       <button id="runModalCancel" class="ghost-btn">ยกเลิก</button>
       <button id="runModalSave" class="primary-btn">บันทึก</button>

@@ -107,6 +107,8 @@ const state = {
   editingShoeId: null, // null = กำลังเพิ่มใหม่
   editingPhoto: null, // รูปที่กำลังแก้ในโมดัล (data URL) หรือ null
   runTargetShoeId: null,
+  runPhoto: null, // รูปในโมดัลบันทึกการวิ่ง (data URL) หรือ null
+  runCoords: null, // {lat, lng} จากปุ่มตำแหน่งปัจจุบัน หรือ null
 };
 
 /* ---------------------------------------------------------------
@@ -221,16 +223,43 @@ function renderDetail() {
 }
 
 const SOURCE_ICON = { manual: "✋", strava: "🏃", csv: "📄" };
+const FEELING_EMOJI = { 5: "😄", 4: "🙂", 3: "😐", 2: "😮‍💨", 1: "🥵" };
+
+function paceText(run) {
+  if (!run.durationMinutes || !run.distanceKm) return "";
+  const secPerKm = (run.durationMinutes * 60) / run.distanceKm;
+  const m = Math.floor(secPerKm / 60);
+  const s = Math.round(secPerKm % 60);
+  return `${m}:${String(s).padStart(2, "0")} /กม.`;
+}
 
 function runRowHtml(run) {
   const dt = new Date(run.date);
   const dateStr = dt.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" });
+
+  const meta = [];
+  const pace = paceText(run);
+  if (pace) meta.push(`⏱ ${pace}`);
+  if (run.location) {
+    const label = escapeHtml(run.location);
+    meta.push(
+      run.lat != null && run.lng != null
+        ? `📍 <a href="https://www.google.com/maps?q=${run.lat},${run.lng}" target="_blank" rel="noopener">${label}</a>`
+        : `📍 ${label}`
+    );
+  }
+  if (run.avgHr) meta.push(`❤️ ${run.avgHr} bpm`);
+  if (run.feeling && FEELING_EMOJI[run.feeling]) meta.push(FEELING_EMOJI[run.feeling]);
+
   return `
     <div class="run-row">
-      <div class="source-icon">${SOURCE_ICON[run.source] || "✋"}</div>
+      ${run.photo
+        ? `<img class="run-thumb" src="${run.photo}" alt="">`
+        : `<div class="source-icon">${SOURCE_ICON[run.source] || "✋"}</div>`}
       <div class="run-main">
-        <div class="run-date">${dateStr}</div>
+        <div class="run-date">${dateStr}${run.runType ? `<span class="run-type-chip">${escapeHtml(run.runType)}</span>` : ""}</div>
         ${run.notes ? `<div class="run-notes">${escapeHtml(run.notes)}</div>` : ""}
+        ${meta.length ? `<div class="run-meta">${meta.map((x) => `<span>${x}</span>`).join("")}</div>` : ""}
       </div>
       <div class="run-distance">${Number(run.distanceKm).toFixed(1)} กม.</div>
       <button class="run-delete" data-id="${run.id}" title="ลบ" aria-label="ลบ">🗑</button>
@@ -314,11 +343,73 @@ function saveShoeFromModal() {
  * ------------------------------------------------------------- */
 function openRunModal(shoeId) {
   state.runTargetShoeId = shoeId;
+  state.runPhoto = null;
+  state.runCoords = null;
   document.getElementById("runDateInput").value = toLocalDateTimeInputValue(new Date());
   document.getElementById("runDistanceInput").value = "";
   document.getElementById("runDurationInput").value = "";
+  document.getElementById("runTypeInput").value = "";
+  document.getElementById("runLocationInput").value = "";
+  document.getElementById("runFeelingInput").value = "";
+  document.getElementById("runHrInput").value = "";
   document.getElementById("runNotesInput").value = "";
+  document.getElementById("runPhotoInput").value = "";
+  updateRunPhotoPreview();
   document.getElementById("runModal").classList.remove("hidden");
+}
+
+function updateRunPhotoPreview() {
+  const wrap = document.getElementById("runPhotoPreview");
+  const img = document.getElementById("runPhotoImg");
+  if (state.runPhoto) {
+    img.src = state.runPhoto;
+    wrap.classList.remove("hidden");
+  } else {
+    img.removeAttribute("src");
+    wrap.classList.add("hidden");
+  }
+}
+
+function useCurrentLocation() {
+  const btn = document.getElementById("runLocationBtn");
+  const input = document.getElementById("runLocationInput");
+  if (!navigator.geolocation) {
+    alert("เบราว์เซอร์นี้ไม่รองรับการหาตำแหน่ง");
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "⏳";
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      state.runCoords = { lat, lng };
+      let name = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      try {
+        // แปลงพิกัดเป็นชื่อสถานที่ (OpenStreetMap Nominatim) — ช้าเกิน 4 วิ หรือเรียกไม่ได้ ใช้พิกัดแทน
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=th`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timer);
+        const j = await res.json();
+        if (j && (j.name || j.display_name)) {
+          name = j.name || j.display_name.split(",").slice(0, 2).join(",").trim();
+        }
+      } catch (e) {}
+      input.value = name;
+      btn.disabled = false;
+      btn.textContent = "📍";
+    },
+    (err) => {
+      alert("หาตำแหน่งไม่สำเร็จ: " + err.message);
+      btn.disabled = false;
+      btn.textContent = "📍";
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
 }
 
 function closeRunModal() {
@@ -339,6 +430,10 @@ function saveRunFromModal() {
   const dateVal = document.getElementById("runDateInput").value;
   const durationMinutes = Number(document.getElementById("runDurationInput").value) || null;
   const notes = document.getElementById("runNotesInput").value.trim();
+  const runType = document.getElementById("runTypeInput").value || null;
+  const location = document.getElementById("runLocationInput").value.trim() || null;
+  const feeling = Number(document.getElementById("runFeelingInput").value) || null;
+  const avgHr = Number(document.getElementById("runHrInput").value) || null;
 
   state.data.runs.push({
     id: uid(),
@@ -347,6 +442,13 @@ function saveRunFromModal() {
     distanceKm,
     durationMinutes,
     notes: notes || null,
+    runType,
+    location,
+    lat: state.runCoords ? state.runCoords.lat : null,
+    lng: state.runCoords ? state.runCoords.lng : null,
+    feeling,
+    avgHr,
+    photo: state.runPhoto,
     source: "manual",
     externalId: null,
     createdAt: new Date().toISOString(),
@@ -755,6 +857,13 @@ function restoreFromJson(obj) {
       distanceKm: Number(inR.distanceKm) || 0,
       durationMinutes: inR.durationMinutes != null ? Number(inR.durationMinutes) : null,
       notes: inR.notes || null,
+      runType: inR.runType || null,
+      location: inR.location || null,
+      lat: inR.lat != null ? Number(inR.lat) : null,
+      lng: inR.lng != null ? Number(inR.lng) : null,
+      feeling: inR.feeling != null ? Number(inR.feeling) : null,
+      avgHr: inR.avgHr != null ? Number(inR.avgHr) : null,
+      photo: inR.photo || null,
       source: inR.source || "manual",
       externalId: inR.externalId || null,
       createdAt: new Date().toISOString(),
@@ -942,6 +1051,23 @@ function bindEvents() {
   document.getElementById("logRunBtn").addEventListener("click", () => openRunModal(state.selectedShoeId));
   document.getElementById("runModalCancel").addEventListener("click", closeRunModal);
   document.getElementById("runModalSave").addEventListener("click", saveRunFromModal);
+
+  document.getElementById("runPhotoInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      state.runPhoto = await resizeImageToDataURL(file, 640, 0.82);
+      updateRunPhotoPreview();
+    } catch (err) {
+      alert("ใช้รูปนี้ไม่ได้: " + err.message);
+    }
+  });
+  document.getElementById("runPhotoRemove").addEventListener("click", () => {
+    state.runPhoto = null;
+    document.getElementById("runPhotoInput").value = "";
+    updateRunPhotoPreview();
+  });
+  document.getElementById("runLocationBtn").addEventListener("click", useCurrentLocation);
 
   document.getElementById("detailMenuBtn").addEventListener("click", () => {
     document.getElementById("detailMenu").classList.toggle("hidden");
