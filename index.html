@@ -12,13 +12,37 @@
   <header class="topbar">
     <h1>👟 ShoeTracker</h1>
     <nav class="tabs" id="mainTabs">
-      <button class="tab-btn active" data-tab="shoes">รองเท้า</button>
+      <button class="tab-btn active" data-tab="dashboard">แดชบอร์ด</button>
+      <button class="tab-btn" data-tab="shoes">รองเท้า</button>
       <button class="tab-btn" data-tab="settings">ตั้งค่า</button>
     </nav>
   </header>
 
+  <!-- ===== แท็บแดชบอร์ด ===== -->
+  <main class="tab-panel" id="panel-dashboard">
+    <div class="dash">
+      <div class="dash-month-nav">
+        <button id="dashPrevMonth" class="icon-btn" aria-label="เดือนก่อนหน้า">‹</button>
+        <h2 id="dashMonthLabel"></h2>
+        <button id="dashNextMonth" class="icon-btn" aria-label="เดือนถัดไป">›</button>
+      </div>
+
+      <div class="dash-stats" id="dashStats"></div>
+
+      <section class="dash-section">
+        <h3 class="section-label">ระยะทางรายเดือน (6 เดือนล่าสุด)</h3>
+        <div class="dash-chart" id="dashChart"></div>
+      </section>
+
+      <section class="dash-section">
+        <h3 class="section-label">สภาพการใช้งานรองเท้า — เป้าเริ่มต้น <span id="dashDefaultTarget">500</span> กม. ก่อนเปลี่ยน</h3>
+        <div class="dash-fleet" id="dashFleet"></div>
+      </section>
+    </div>
+  </main>
+
   <!-- ===== แท็บรองเท้า ===== -->
-  <main class="tab-panel" id="panel-shoes">
+  <main class="tab-panel hidden" id="panel-shoes">
     <div class="master-detail" id="shoesLayout">
 
       <section class="shoe-list-pane" id="listPane">
@@ -63,6 +87,8 @@
           </div>
           <img id="detailPhoto" class="detail-photo hidden" alt="รูปรองเท้า">
           <div class="total-distance" id="detailTotal"></div>
+          <div class="detail-progress" id="detailProgress"></div>
+          <div class="detail-specs" id="detailSpecs"></div>
           <h3 class="section-label">ประวัติการวิ่ง</h3>
           <div id="runList" class="run-list"></div>
         </div>
@@ -160,8 +186,32 @@
         <option value="อื่นๆ">อื่นๆ</option>
       </select>
     </label>
-    <label>ระยะทางเริ่มต้น (กม.)
-      <input type="number" id="shoeStartInput" min="0" step="0.1" value="0">
+    <div class="field-2col">
+      <label>ไซส์ (ถ้ามี)
+        <input type="text" id="shoeSizeInput" placeholder="เช่น US 9.5 / 27.5 cm">
+      </label>
+      <label>สี (ถ้ามี)
+        <input type="text" id="shoeColorInput" placeholder="เช่น ส้ม/ดำ">
+      </label>
+    </div>
+    <div class="field-2col">
+      <label>วันที่ซื้อ (ถ้ามี)
+        <input type="date" id="shoePurchaseDateInput">
+      </label>
+      <label>ราคา (บาท, ถ้ามี)
+        <input type="number" id="shoePriceInput" min="0" step="1" placeholder="เช่น 5900">
+      </label>
+    </div>
+    <div class="field-2col">
+      <label>เป้าระยะก่อนเปลี่ยน (กม.)
+        <input type="number" id="shoeTargetInput" min="0" step="10" value="500">
+      </label>
+      <label>ระยะทางเริ่มต้น (กม.)
+        <input type="number" id="shoeStartInput" min="0" step="0.1" value="0">
+      </label>
+    </div>
+    <label>บันทึกเพิ่มเติม (ถ้ามี)
+      <input type="text" id="shoeNotesInput" placeholder="เช่น ใช้สำหรับซ้อมยาว / วิ่งแข่งเท่านั้น">
     </label>
     <label>รูปรองเท้า (ถ้ามี)
       <input type="file" id="shoePhotoInput" accept="image/*">

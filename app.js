@@ -81,10 +81,30 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+const DEFAULT_TARGET_KM = 500;
+
 function totalDistance(shoe) {
   const runs = state.data.runs.filter((r) => r.shoeId === shoe.id);
   const sum = runs.reduce((acc, r) => acc + (Number(r.distanceKm) || 0), 0);
   return (Number(shoe.startingDistanceKm) || 0) + sum;
+}
+
+/* เป้าระยะก่อนเปลี่ยนรองเท้า (กม.) — ใช้ค่าเริ่มต้น 500 ถ้ายังไม่ตั้ง */
+function shoeTargetKm(shoe) {
+  const t = Number(shoe.mileageTargetKm);
+  return t > 0 ? t : DEFAULT_TARGET_KM;
+}
+
+/* สถานะการใช้งานเทียบเป้า: ok < 75% ≤ warn < 100% ≤ over */
+function wearState(dist, target) {
+  if (dist >= target) return "over";
+  if (dist >= target * 0.75) return "warn";
+  return "ok";
+}
+
+/* จัดรูปตัวเลข กม. (ทศนิยม 1 ตำแหน่ง, ตัด .0) */
+function fmtKm(n) {
+  return (Math.round(Number(n) * 10) / 10).toLocaleString("th-TH");
 }
 
 function shoeRuns(shoeId) {
@@ -102,7 +122,8 @@ function unassignedRuns() {
  * ------------------------------------------------------------- */
 const state = {
   data: loadData(),
-  currentTab: "shoes",
+  currentTab: "dashboard",
+  dashMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   selectedShoeId: null,
   editingShoeId: null, // null = กำลังเพิ่มใหม่
   editingPhoto: null, // รูปที่กำลังแก้ในโมดัล (data URL) หรือ null
@@ -152,16 +173,23 @@ function renderShoeList() {
 function shoeCardHtml(shoe) {
   const selected = shoe.id === state.selectedShoeId ? "selected" : "";
   const thumb = shoe.photo ? `<img class="shoe-thumb" src="${shoe.photo}" alt="">` : "";
+  const dist = totalDistance(shoe);
+  const target = shoeTargetKm(shoe);
+  const pct = Math.min(100, Math.round((dist / target) * 100));
+  const st = wearState(dist, target);
   return `
     <div class="shoe-card ${selected}" data-id="${shoe.id}">
-      <div class="shoe-card-left">
-        ${thumb}
-        <div>
-          <div class="name">${escapeHtml(shoe.name)}</div>
-          ${shoe.brand ? `<div class="brand">${escapeHtml(shoe.brand)}</div>` : ""}
+      <div class="shoe-card-row">
+        <div class="shoe-card-left">
+          ${thumb}
+          <div>
+            <div class="name">${escapeHtml(shoe.name)}</div>
+            ${shoe.brand ? `<div class="brand">${escapeHtml(shoe.brand)}</div>` : ""}
+          </div>
         </div>
+        <div class="distance">${dist.toFixed(0)} กม.</div>
       </div>
-      <div class="distance">${totalDistance(shoe).toFixed(0)} กม.</div>
+      <div class="pbar slim"><div class="pbar-fill ${st}" style="width:${pct}%"></div></div>
     </div>`;
 }
 
@@ -189,7 +217,12 @@ function renderDetail() {
   document.getElementById("detailBrand").textContent = [shoe.brand, shoe.category]
     .filter(Boolean)
     .join(" · ");
-  document.getElementById("detailTotal").textContent = `${totalDistance(shoe).toFixed(1)} กิโลเมตร`;
+  const dist = totalDistance(shoe);
+  const target = shoeTargetKm(shoe);
+  document.getElementById("detailTotal").textContent = `${dist.toFixed(1)} กิโลเมตร`;
+
+  renderDetailProgress(shoe, dist, target);
+  renderDetailSpecs(shoe, dist);
 
   const detailPhoto = document.getElementById("detailPhoto");
   if (shoe.photo) {
@@ -220,6 +253,50 @@ function renderDetail() {
       renderDetail();
     });
   });
+}
+
+/* แถบความคืบหน้าระยะการใช้งานในหน้ารายละเอียด */
+function renderDetailProgress(shoe, dist, target) {
+  const el = document.getElementById("detailProgress");
+  const pct = Math.min(100, Math.round((dist / target) * 100));
+  const st = wearState(dist, target);
+  const note =
+    dist >= target
+      ? `⚠ เกินเป้าแล้ว ${fmtKm(dist - target)} กม. — ควรพิจารณาเปลี่ยนรองเท้า`
+      : `เหลืออีก ${fmtKm(target - dist)} กม. จากเป้า ${fmtKm(target)} กม. (${pct}%)`;
+  el.innerHTML = `
+    <div class="pbar big"><div class="pbar-fill ${st}" style="width:${pct}%"></div></div>
+    <div class="detail-prog-note ${st}">${note}</div>`;
+}
+
+/* ตารางรายละเอียดรองเท้า (วันที่ซื้อ ราคา ต้นทุน/กม. ฯลฯ) */
+function renderDetailSpecs(shoe, dist) {
+  const el = document.getElementById("detailSpecs");
+  const specs = [];
+  if (shoe.purchaseDate) {
+    specs.push(["วันที่ซื้อ", new Date(shoe.purchaseDate).toLocaleDateString("th-TH", { dateStyle: "medium" })]);
+  }
+  const price = shoe.price != null && shoe.price !== "" ? Number(shoe.price) : null;
+  if (price != null && !isNaN(price)) {
+    specs.push(["ราคา", price.toLocaleString("th-TH") + " บาท"]);
+    if (price > 0 && dist > 0) {
+      specs.push(["ต้นทุนต่อ กม.", (price / dist).toLocaleString("th-TH", { maximumFractionDigits: 1 }) + " บาท/กม."]);
+    }
+  }
+  if (shoe.size) specs.push(["ไซส์", escapeHtml(shoe.size)]);
+  if (shoe.color) specs.push(["สี", escapeHtml(shoe.color)]);
+  specs.push(["จำนวนครั้งที่วิ่ง", shoeRuns(shoe.id).length + " ครั้ง"]);
+  if (shoe.dateAdded) {
+    specs.push(["เพิ่มเข้าระบบเมื่อ", new Date(shoe.dateAdded).toLocaleDateString("th-TH", { dateStyle: "medium" })]);
+  }
+
+  let html = specs
+    .map(([k, v]) => `<div class="spec"><span class="spec-k">${k}</span><span class="spec-v">${v}</span></div>`)
+    .join("");
+  if (shoe.notes) {
+    html += `<div class="spec spec-full"><span class="spec-k">บันทึก</span><span class="spec-v">${escapeHtml(shoe.notes)}</span></div>`;
+  }
+  el.innerHTML = html;
 }
 
 const SOURCE_ICON = { manual: "✋", strava: "🏃", csv: "📄" };
@@ -282,6 +359,13 @@ function openShoeModal(shoeId) {
   document.getElementById("shoeBrandInput").value = shoe ? shoe.brand : "";
   document.getElementById("shoeCategoryInput").value = shoe ? shoe.category : "ถนน";
   document.getElementById("shoeStartInput").value = shoe ? shoe.startingDistanceKm : 0;
+  document.getElementById("shoeSizeInput").value = shoe ? shoe.size || "" : "";
+  document.getElementById("shoeColorInput").value = shoe ? shoe.color || "" : "";
+  document.getElementById("shoePurchaseDateInput").value =
+    shoe && shoe.purchaseDate ? String(shoe.purchaseDate).slice(0, 10) : "";
+  document.getElementById("shoePriceInput").value = shoe && shoe.price != null ? shoe.price : "";
+  document.getElementById("shoeTargetInput").value = shoe ? shoeTargetKm(shoe) : DEFAULT_TARGET_KM;
+  document.getElementById("shoeNotesInput").value = shoe ? shoe.notes || "" : "";
 
   state.editingPhoto = shoe && shoe.photo ? shoe.photo : null;
   document.getElementById("shoePhotoInput").value = "";
@@ -315,18 +399,26 @@ function saveShoeFromModal() {
   const brand = document.getElementById("shoeBrandInput").value.trim();
   const category = document.getElementById("shoeCategoryInput").value;
   const startingDistanceKm = Number(document.getElementById("shoeStartInput").value) || 0;
+  const size = document.getElementById("shoeSizeInput").value.trim();
+  const color = document.getElementById("shoeColorInput").value.trim();
+  const purchaseDate = document.getElementById("shoePurchaseDateInput").value || null;
+  const priceVal = document.getElementById("shoePriceInput").value;
+  const price = priceVal === "" ? null : Number(priceVal);
+  const mileageTargetKm = Number(document.getElementById("shoeTargetInput").value) || DEFAULT_TARGET_KM;
+  const notes = document.getElementById("shoeNotesInput").value.trim();
+
+  const fields = {
+    name, brand, category, startingDistanceKm, size, color,
+    purchaseDate, price, mileageTargetKm, notes, photo: state.editingPhoto,
+  };
 
   if (state.editingShoeId) {
     const shoe = state.data.shoes.find((s) => s.id === state.editingShoeId);
-    Object.assign(shoe, { name, brand, category, startingDistanceKm, photo: state.editingPhoto });
+    Object.assign(shoe, fields);
   } else {
     state.data.shoes.push({
       id: uid(),
-      name,
-      brand,
-      category,
-      startingDistanceKm,
-      photo: state.editingPhoto,
+      ...fields,
       isRetired: false,
       dateAdded: new Date().toISOString(),
     });
@@ -781,6 +873,146 @@ async function syncStrava() {
 }
 
 /* ---------------------------------------------------------------
+ * แดชบอร์ด — สรุปรายเดือน + สภาพการใช้งานรองเท้า
+ * ------------------------------------------------------------- */
+function inMonth(dateStr, y, m) {
+  const d = new Date(dateStr);
+  return d.getFullYear() === y && d.getMonth() === m;
+}
+
+function monthDistance(y, m) {
+  return state.data.runs
+    .filter((r) => r.date && inMonth(r.date, y, m))
+    .reduce((a, r) => a + (Number(r.distanceKm) || 0), 0);
+}
+
+function renderDashboard() {
+  const y = state.dashMonth.getFullYear();
+  const m = state.dashMonth.getMonth();
+  document.getElementById("dashMonthLabel").textContent = state.dashMonth.toLocaleDateString("th-TH", {
+    month: "long",
+    year: "numeric",
+  });
+
+  // ปิดปุ่ม "เดือนถัดไป" ไม่ให้เลื่อนไปอนาคต
+  const now = new Date();
+  const atOrAfterNow = y > now.getFullYear() || (y === now.getFullYear() && m >= now.getMonth());
+  document.getElementById("dashNextMonth").disabled = atOrAfterNow;
+
+  const monthRuns = state.data.runs.filter((r) => r.date && inMonth(r.date, y, m));
+  const totalKm = monthRuns.reduce((a, r) => a + (Number(r.distanceKm) || 0), 0);
+  const totalMin = monthRuns.reduce((a, r) => a + (Number(r.durationMinutes) || 0), 0);
+  const count = monthRuns.length;
+
+  // รองเท้าที่ใช้มากที่สุดในเดือนนั้น (วัดจากระยะทาง)
+  const byShoe = {};
+  monthRuns.forEach((r) => {
+    if (!r.shoeId) return;
+    if (!byShoe[r.shoeId]) byShoe[r.shoeId] = { km: 0, count: 0 };
+    byShoe[r.shoeId].km += Number(r.distanceKm) || 0;
+    byShoe[r.shoeId].count += 1;
+  });
+  let topId = null;
+  Object.entries(byShoe).forEach(([id, v]) => {
+    if (!topId || v.km > byShoe[topId].km) topId = id;
+  });
+  const topShoe = topId ? state.data.shoes.find((s) => s.id === topId) : null;
+
+  const hrs = Math.floor(totalMin / 60);
+  const mins = Math.round(totalMin % 60);
+  const timeStr = totalMin ? (hrs ? `${hrs} ชม. ` : "") + `${mins} นาที` : "—";
+  const topStr = topShoe
+    ? `${escapeHtml(topShoe.name)} <span class="unit">(${fmtKm(byShoe[topId].km)} กม. · ${byShoe[topId].count} ครั้ง)</span>`
+    : "—";
+
+  document.getElementById("dashStats").innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">ระยะทางเดือนนี้</div>
+      <div class="stat-value">${fmtKm(totalKm)}<span class="unit"> กม.</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">จำนวนครั้ง</div>
+      <div class="stat-value">${count}<span class="unit"> ครั้ง</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">เวลารวม</div>
+      <div class="stat-value stat-sm">${timeStr}</div>
+    </div>
+    <div class="stat-card stat-wide">
+      <div class="stat-label">รองเท้าที่ใช้มากที่สุด</div>
+      <div class="stat-value stat-sm">${topStr}</div>
+    </div>`;
+
+  renderMonthChart();
+  renderFleet();
+}
+
+/* กราฟแท่งระยะทาง 6 เดือนล่าสุด (นับถอยหลังจากเดือนที่เลือก) */
+function renderMonthChart() {
+  const el = document.getElementById("dashChart");
+  const base = state.dashMonth;
+  const cols = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    cols.push({ d, km: monthDistance(d.getFullYear(), d.getMonth()) });
+  }
+  const max = Math.max(1, ...cols.map((c) => c.km));
+  el.innerHTML = cols
+    .map((c) => {
+      const h = Math.round((c.km / max) * 100);
+      const isCur = c.d.getFullYear() === base.getFullYear() && c.d.getMonth() === base.getMonth();
+      return `
+        <div class="bar-col">
+          <div class="bar-val">${c.km ? fmtKm(c.km) : ""}</div>
+          <div class="bar-track"><div class="bar-fill ${isCur ? "cur" : ""}" style="height:${h}%"></div></div>
+          <div class="bar-lbl">${c.d.toLocaleDateString("th-TH", { month: "short" })}</div>
+        </div>`;
+    })
+    .join("");
+}
+
+/* รายการ progress bar ของรองเท้าที่ใช้งานอยู่ทุกคู่ */
+function renderFleet() {
+  const el = document.getElementById("dashFleet");
+  const shoes = state.data.shoes
+    .filter((s) => !s.isRetired)
+    .map((s) => ({ s, dist: totalDistance(s), target: shoeTargetKm(s) }))
+    .sort((a, b) => b.dist / b.target - a.dist / a.target);
+
+  if (!shoes.length) {
+    el.innerHTML = `<p class="empty-list">ยังไม่มีรองเท้าที่ใช้งานอยู่ — เพิ่มได้ในแท็บ “รองเท้า”</p>`;
+    return;
+  }
+
+  el.innerHTML = shoes
+    .map(({ s, dist, target }) => {
+      const pct = Math.min(100, Math.round((dist / target) * 100));
+      const st = wearState(dist, target);
+      const note =
+        dist >= target
+          ? `⚠ เกินเป้า ${fmtKm(dist - target)} กม. · ควรเปลี่ยน`
+          : `เหลืออีก ${fmtKm(target - dist)} กม.`;
+      return `
+        <button class="fleet-row" data-id="${s.id}">
+          <div class="fleet-top">
+            <span class="fleet-name">${escapeHtml(s.name)}</span>
+            <span class="fleet-num">${fmtKm(dist)} / ${fmtKm(target)} กม.</span>
+          </div>
+          <div class="pbar"><div class="pbar-fill ${st}" style="width:${pct}%"></div></div>
+          <div class="fleet-note ${st}">${note}</div>
+        </button>`;
+    })
+    .join("");
+
+  el.querySelectorAll(".fleet-row").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchTab("shoes");
+      selectShoe(btn.dataset.id);
+    });
+  });
+}
+
+/* ---------------------------------------------------------------
  * ทั่วไป
  * ------------------------------------------------------------- */
 function escapeHtml(str) {
@@ -796,8 +1028,10 @@ function switchTab(tab) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
+  document.getElementById("panel-dashboard").classList.toggle("hidden", tab !== "dashboard");
   document.getElementById("panel-shoes").classList.toggle("hidden", tab !== "shoes");
   document.getElementById("panel-settings").classList.toggle("hidden", tab !== "settings");
+  if (tab === "dashboard") renderDashboard();
 }
 
 function exportData() {
@@ -835,6 +1069,12 @@ function restoreFromJson(obj) {
         brand: inS.brand || "",
         category: inS.category || "ถนน",
         startingDistanceKm: Number(inS.startingDistanceKm) || 0,
+        size: inS.size || "",
+        color: inS.color || "",
+        purchaseDate: inS.purchaseDate || null,
+        price: inS.price != null ? Number(inS.price) : null,
+        mileageTargetKm: Number(inS.mileageTargetKm) || DEFAULT_TARGET_KM,
+        notes: inS.notes || "",
         photo: inS.photo || null,
         isRetired: !!inS.isRetired,
         dateAdded: inS.dateAdded || new Date().toISOString(),
@@ -1027,6 +1267,15 @@ function bindEvents() {
     if (btn) switchTab(btn.dataset.tab);
   });
 
+  document.getElementById("dashPrevMonth").addEventListener("click", () => {
+    state.dashMonth = new Date(state.dashMonth.getFullYear(), state.dashMonth.getMonth() - 1, 1);
+    renderDashboard();
+  });
+  document.getElementById("dashNextMonth").addEventListener("click", () => {
+    state.dashMonth = new Date(state.dashMonth.getFullYear(), state.dashMonth.getMonth() + 1, 1);
+    renderDashboard();
+  });
+
   document.getElementById("addShoeBtn").addEventListener("click", () => openShoeModal(null));
   document.getElementById("shoeModalCancel").addEventListener("click", closeShoeModal);
   document.getElementById("shoeModalSave").addEventListener("click", saveShoeFromModal);
@@ -1192,6 +1441,7 @@ function initSyncUI() {
  * ------------------------------------------------------------- */
 async function init() {
   bindEvents();
+  renderDashboard();
   renderShoeList();
   renderDetail();
   renderSettingsCsvOptions();
