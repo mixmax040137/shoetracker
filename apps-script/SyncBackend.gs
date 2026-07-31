@@ -134,16 +134,16 @@ function dedupe_(data) {
     if (r.shoeId && idRemap[r.shoeId] && idRemap[r.shoeId] !== r.shoeId) r.shoeId = idRemap[r.shoeId];
   }
 
-  // การวิ่ง: รวมตาม externalId (ว่าง = กรอกมือ ไม่รวม)
+  // การวิ่ง: รวมตาม externalId แบบมาตรฐาน (ว่าง = กรอกมือ ไม่รวม)
   var byExt = {}, keptRuns = [];
   for (i = 0; i < runs.length; i++) {
     var rr = runs[i];
-    var ext = rr.externalId;
-    if (ext == null || ext === "") { keptRuns.push(rr); continue; }
-    var ex = byExt[ext];
-    byExt[ext] = ex ? betterRun_(ex, rr) : rr;
+    var k = normExt_(rr.externalId);
+    if (!k) { keptRuns.push(rr); continue; }
+    var ex = byExt[k];
+    byExt[k] = ex ? betterRun_(ex, rr) : rr;
   }
-  for (var e in byExt) if (byExt.hasOwnProperty(e)) keptRuns.push(byExt[e]);
+  for (var e in byExt) if (byExt.hasOwnProperty(e)) { byExt[e].externalId = e; keptRuns.push(byExt[e]); }
 
   return { shoes: keptShoes, runs: keptRuns, deleted: data.deleted || { shoes: {}, runs: {} } };
 }
@@ -152,6 +152,11 @@ function betterRun_(a, b) {
   var as = a.shoeId ? 1 : 0, bs = b.shoeId ? 1 : 0;
   if (as !== bs) return as > bs ? a : b;
   return (Number(b.updatedAt) || 0) > (Number(a.updatedAt) || 0) ? b : a;
+}
+
+function normExt_(ext) {
+  if (ext == null || ext === "") return "";
+  return String(ext).replace(/^strava[a-z]*_/i, "strava_");
 }
 
 function mergeDeleted_(a, b) {

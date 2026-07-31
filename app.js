@@ -1390,10 +1390,11 @@ function restoreFromJson(obj) {
     }
   });
 
-  const existingExt = new Set(state.data.runs.map((r) => r.externalId).filter(Boolean));
+  const existingExt = new Set(state.data.runs.map((r) => normExt(r.externalId)).filter(Boolean));
   let addedRuns = 0;
   obj.runs.forEach((inR) => {
-    if (inR.externalId && existingExt.has(inR.externalId)) return;
+    const extKey = normExt(inR.externalId);
+    if (extKey && existingExt.has(extKey)) return;
     state.data.runs.push({
       id: uid(),
       shoeId: inR.shoeId != null ? idMap[inR.shoeId] || null : null,
@@ -1409,11 +1410,11 @@ function restoreFromJson(obj) {
       avgHr: inR.avgHr != null ? Number(inR.avgHr) : null,
       photo: inR.photo || null,
       source: inR.source || "manual",
-      externalId: inR.externalId || null,
+      externalId: extKey || null,
       createdAt: new Date().toISOString(),
       updatedAt: nowTs(),
     });
-    if (inR.externalId) existingExt.add(inR.externalId);
+    if (extKey) existingExt.add(extKey);
     addedRuns++;
   });
   return { addedShoes, addedRuns };
@@ -1426,6 +1427,7 @@ function handleDataImport(file) {
     try {
       const obj = JSON.parse(String(reader.result));
       const { addedShoes, addedRuns } = restoreFromJson(obj);
+      state.data = dedupeData(state.data);
       if (!saveData()) return;
       renderShoeList();
       renderDetail();
@@ -1532,6 +1534,12 @@ function mergeData(local, remote) {
   });
 }
 
+/* ทำ externalId ให้เป็นรูปมาตรฐาน — strava_/stravacsv_/ฯลฯ ของกิจกรรมเดียวกันให้เท่ากัน */
+function normExt(ext) {
+  if (ext == null || ext === "") return "";
+  return String(ext).replace(/^strava[a-z]*_/i, "strava_");
+}
+
 /* เลือกเรคคอร์ดวิ่งที่ "ดีกว่า" เมื่อ Activity ID ซ้ำ: มีรองเท้าก่อน แล้วค่อยใหม่กว่า */
 function betterRun(a, b) {
   const as = a.shoeId ? 1 : 0;
@@ -1570,19 +1578,22 @@ function dedupeData(data) {
     if (r.shoeId && idRemap[r.shoeId] && idRemap[r.shoeId] !== r.shoeId) r.shoeId = idRemap[r.shoeId];
   });
 
-  // 2) การวิ่ง: รวมตาม externalId (การกรอกมือ externalId ว่าง — ไม่รวม)
+  // 2) การวิ่ง: รวมตาม externalId แบบมาตรฐาน (การกรอกมือ externalId ว่าง — ไม่รวม)
   const byExt = new Map();
   const keptRuns = [];
   runs.forEach((r) => {
-    const ext = r.externalId;
-    if (ext == null || ext === "") {
+    const k = normExt(r.externalId);
+    if (!k) {
       keptRuns.push(r);
       return;
     }
-    const ex = byExt.get(ext);
-    byExt.set(ext, ex ? betterRun(ex, r) : r);
+    const ex = byExt.get(k);
+    byExt.set(k, ex ? betterRun(ex, r) : r);
   });
-  byExt.forEach((r) => keptRuns.push(r));
+  byExt.forEach((r, k) => {
+    r.externalId = k; // ปรับเป็นรูปมาตรฐาน กันซ้ำในอนาคต
+    keptRuns.push(r);
+  });
 
   return { shoes: keptShoes, runs: keptRuns, deleted: data.deleted || { shoes: {}, runs: {} } };
 }
