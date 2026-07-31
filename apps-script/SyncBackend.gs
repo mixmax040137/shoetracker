@@ -106,11 +106,52 @@ function mergeData_(a, b) {
   var cutoff = Date.now() - 60 * 24 * 3600 * 1000;
   dShoes = prune_(dShoes, cutoff);
   dRuns = prune_(dRuns, cutoff);
-  return {
+  return dedupe_({
     shoes: mergeCol_(a.shoes, b.shoes, dShoes),
     runs: mergeCol_(a.runs, b.runs, dRuns),
     deleted: { shoes: dShoes, runs: dRuns }
-  };
+  });
+}
+
+/* กันซ้ำ: รวมรองเท้าชื่อซ้ำ (ชี้ runs ไปคู่ที่เก็บไว้) + รวมการวิ่ง externalId ซ้ำ */
+function dedupe_(data) {
+  var shoes = (data.shoes || []).slice();
+  var runs = (data.runs || []).slice();
+  var i;
+
+  // รองเท้า: รวมตามชื่อ เก็บคู่ที่ dateAdded เก่าสุด
+  shoes.sort(function (x, y) { return new Date(x.dateAdded || 0) - new Date(y.dateAdded || 0); });
+  var nameToId = {}, idRemap = {}, keptShoes = [];
+  for (i = 0; i < shoes.length; i++) {
+    var s = shoes[i];
+    var key = String(s.name || "").toLowerCase().replace(/^\s+|\s+$/g, "");
+    if (!key) { keptShoes.push(s); continue; }
+    if (nameToId[key]) { idRemap[s.id] = nameToId[key]; }
+    else { nameToId[key] = s.id; idRemap[s.id] = s.id; keptShoes.push(s); }
+  }
+  for (i = 0; i < runs.length; i++) {
+    var r = runs[i];
+    if (r.shoeId && idRemap[r.shoeId] && idRemap[r.shoeId] !== r.shoeId) r.shoeId = idRemap[r.shoeId];
+  }
+
+  // การวิ่ง: รวมตาม externalId (ว่าง = กรอกมือ ไม่รวม)
+  var byExt = {}, keptRuns = [];
+  for (i = 0; i < runs.length; i++) {
+    var rr = runs[i];
+    var ext = rr.externalId;
+    if (ext == null || ext === "") { keptRuns.push(rr); continue; }
+    var ex = byExt[ext];
+    byExt[ext] = ex ? betterRun_(ex, rr) : rr;
+  }
+  for (var e in byExt) if (byExt.hasOwnProperty(e)) keptRuns.push(byExt[e]);
+
+  return { shoes: keptShoes, runs: keptRuns, deleted: data.deleted || { shoes: {}, runs: {} } };
+}
+
+function betterRun_(a, b) {
+  var as = a.shoeId ? 1 : 0, bs = b.shoeId ? 1 : 0;
+  if (as !== bs) return as > bs ? a : b;
+  return (Number(b.updatedAt) || 0) > (Number(a.updatedAt) || 0) ? b : a;
 }
 
 function mergeDeleted_(a, b) {

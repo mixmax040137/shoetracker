@@ -869,6 +869,117 @@ function parseCsvRuns(text, shoeId) {
 }
 
 /* ---------------------------------------------------------------
+ * นำเข้าจากไฟล์ Strava export (activities.csv)
+ * ------------------------------------------------------------- */
+/* CSV parser ที่รองรับฟิลด์มี "..." และคอมมาข้างใน */
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else q = false;
+      } else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const STRAVA_FOOT_TYPES = { Run: null, "Trail Run": "เทรล", Walk: "เดิน", Hike: "เดินเขา", "Virtual Run": "วิ่งลู่" };
+const KNOWN_BRANDS = ["ASICS", "Adidas", "Saucony", "Nike", "Hoka", "Mizuno", "Brooks", "Puma", "On", "Salomon", "New Balance"];
+
+function importStravaCsv(text) {
+  const rows = parseCsvRows(text);
+  if (!rows.length) throw new Error("ไฟล์ว่างเปล่า");
+  const H = rows[0];
+  const idx = (n) => H.indexOf(n);
+  const iId = idx("Activity ID"), iDate = idx("Activity Date"), iName = idx("Activity Name"),
+    iType = idx("Activity Type"), iGear = idx("Activity Gear"), iMoving = idx("Moving Time"),
+    iHr = idx("Average Heart Rate");
+  if (iId === -1 || iType === -1 || iMoving === -1) {
+    throw new Error("ไม่ใช่ไฟล์ activities.csv ของ Strava (ไม่พบคอลัมน์ที่ต้องการ)");
+  }
+  const iDistM = iMoving + 1; // Distance (เมตร) อยู่คอลัมน์ถัดจาก Moving Time
+  const BIKE = /bianchi|nirone/i;
+
+  const shoesByName = {};
+  const getShoe = (name, dateISO) => {
+    const key = name.toLowerCase();
+    if (!shoesByName[key]) {
+      const brand = KNOWN_BRANDS.find((b) => name.toLowerCase().startsWith(b.toLowerCase())) || "";
+      shoesByName[key] = {
+        id: uid(), name, brand, category: "ถนน", startingDistanceKm: 0, size: "", color: "",
+        purchaseDate: null, price: null, mileageTargetKm: DEFAULT_TARGET_KM, notes: "",
+        photo: null, isRetired: false, dateAdded: dateISO,
+      };
+    }
+    const s = shoesByName[key];
+    if (dateISO < s.dateAdded) s.dateAdded = dateISO;
+    return s.id;
+  };
+
+  const runs = [];
+  let unassigned = 0;
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row[iId]) continue;
+    if (!(row[iType] in STRAVA_FOOT_TYPES)) continue; // เอาเฉพาะกิจกรรมที่ใส่รองเท้า
+    const gear = (row[iGear] || "").trim();
+    if (BIKE.test(gear)) continue; // ตัดจักรยาน
+    const distKm = Math.round(((Number(row[iDistM]) || 0) / 1000) * 1000) / 1000;
+    if (!(distKm > 0)) continue;
+    const d = new Date(row[iDate]);
+    if (isNaN(d.getTime())) continue;
+    const dur = Number(row[iMoving]);
+    const hr = iHr > -1 ? Number(row[iHr]) : 0;
+    let shoeId = null;
+    if (gear) shoeId = getShoe(gear, d.toISOString());
+    else unassigned++;
+    runs.push({
+      id: uid(), shoeId, date: d.toISOString(), distanceKm: distKm,
+      durationMinutes: dur > 0 ? Math.round(dur / 60) : null, notes: row[iName] || null,
+      runType: STRAVA_FOOT_TYPES[row[iType]] || null, location: null, lat: null, lng: null,
+      feeling: null, avgHr: hr > 0 ? Math.round(hr) : null, photo: null,
+      source: "strava", externalId: "strava_" + row[iId],
+    });
+  }
+
+  const { addedShoes, addedRuns } = restoreFromJson({ shoes: Object.values(shoesByName), runs });
+  state.data = dedupeData(state.data); // กันซ้ำอีกชั้น
+  return { addedShoes, addedRuns, unassigned, scanned: runs.length };
+}
+
+function handleStravaCsvImport(file) {
+  const resultEl = document.getElementById("stravaCsvResult");
+  resultEl.textContent = "กำลังอ่านไฟล์…";
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const { addedShoes, addedRuns, unassigned } = importStravaCsv(String(reader.result));
+      if (!saveData()) return;
+      renderDashboard();
+      renderShoeList();
+      renderDetail();
+      renderSettingsCsvOptions();
+      resultEl.textContent =
+        addedRuns === 0
+          ? "ไม่มีรายการใหม่ (กันซ้ำด้วย Activity ID แล้ว — ของเดิมมีอยู่ครบ)"
+          : `นำเข้าสำเร็จ: รองเท้าใหม่ ${addedShoes} คู่, กิจกรรม ${addedRuns} รายการ` +
+            (unassigned ? ` · ไม่มีรองเท้า ${unassigned} รายการ (ไปกำหนดในแท็บรองเท้าได้)` : "");
+    } catch (err) {
+      resultEl.textContent = "นำเข้าไม่สำเร็จ: " + err.message;
+    }
+  };
+  reader.onerror = () => { resultEl.textContent = "อ่านไฟล์ไม่สำเร็จ"; };
+  reader.readAsText(file);
+}
+
+/* ---------------------------------------------------------------
  * Strava
  * ------------------------------------------------------------- */
 function loadStravaTokens() {
@@ -1414,15 +1525,71 @@ function mergeData(local, remote) {
   remote = remote || {};
   const dShoes = mergeDeletedMap((local.deleted || {}).shoes, (remote.deleted || {}).shoes);
   const dRuns = mergeDeletedMap((local.deleted || {}).runs, (remote.deleted || {}).runs);
-  return {
+  return dedupeData({
     shoes: mergeCollection(local.shoes, remote.shoes, dShoes),
     runs: mergeCollection(local.runs, remote.runs, dRuns),
     deleted: { shoes: dShoes, runs: dRuns },
-  };
+  });
+}
+
+/* เลือกเรคคอร์ดวิ่งที่ "ดีกว่า" เมื่อ Activity ID ซ้ำ: มีรองเท้าก่อน แล้วค่อยใหม่กว่า */
+function betterRun(a, b) {
+  const as = a.shoeId ? 1 : 0;
+  const bs = b.shoeId ? 1 : 0;
+  if (as !== bs) return as > bs ? a : b;
+  return (Number(b.updatedAt) || 0) > (Number(a.updatedAt) || 0) ? b : a;
+}
+
+/* กันซ้ำ: รวมรองเท้าชื่อซ้ำ (ชี้ runs ไปคู่ที่เก็บไว้) + รวมการวิ่งที่ externalId ซ้ำ */
+function dedupeData(data) {
+  const shoes = (data.shoes || []).slice();
+  const runs = (data.runs || []).slice();
+
+  // 1) รองเท้า: รวมตามชื่อ (ไม่สนตัวพิมพ์) เก็บคู่ที่เพิ่มก่อน
+  const nameToId = {};
+  const idRemap = {};
+  const keptShoes = [];
+  shoes
+    .slice()
+    .sort((a, b) => new Date(a.dateAdded || 0) - new Date(b.dateAdded || 0))
+    .forEach((s) => {
+      const key = (s.name || "").toLowerCase().trim();
+      if (!key) {
+        keptShoes.push(s);
+        return;
+      }
+      if (nameToId[key]) {
+        idRemap[s.id] = nameToId[key];
+      } else {
+        nameToId[key] = s.id;
+        idRemap[s.id] = s.id;
+        keptShoes.push(s);
+      }
+    });
+  runs.forEach((r) => {
+    if (r.shoeId && idRemap[r.shoeId] && idRemap[r.shoeId] !== r.shoeId) r.shoeId = idRemap[r.shoeId];
+  });
+
+  // 2) การวิ่ง: รวมตาม externalId (การกรอกมือ externalId ว่าง — ไม่รวม)
+  const byExt = new Map();
+  const keptRuns = [];
+  runs.forEach((r) => {
+    const ext = r.externalId;
+    if (ext == null || ext === "") {
+      keptRuns.push(r);
+      return;
+    }
+    const ex = byExt.get(ext);
+    byExt.set(ext, ex ? betterRun(ex, r) : r);
+  });
+  byExt.forEach((r) => keptRuns.push(r));
+
+  return { shoes: keptShoes, runs: keptRuns, deleted: data.deleted || { shoes: {}, runs: {} } };
 }
 
 /* นำผลลัพธ์ที่ผสานแล้วมาแทนที่ข้อมูลในเครื่อง แล้ววาดหน้าจอใหม่ (ไม่ยิงซิงค์ซ้ำ) */
 function applyMerged(merged) {
+  merged = dedupeData(merged || {});
   const del = merged.deleted || {};
   state.data = {
     shoes: merged.shoes || [],
@@ -1681,6 +1848,12 @@ function bindEvents() {
     if (file) handleCsvImport(file);
   });
 
+  document.getElementById("stravaCsvInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) handleStravaCsvImport(file);
+    e.target.value = "";
+  });
+
   document.getElementById("exportDataBtn").addEventListener("click", exportData);
   document.getElementById("importDataBtn").addEventListener("click", () => {
     document.getElementById("importDataInput").click();
@@ -1840,6 +2013,12 @@ async function init() {
   setupPWA();
   bindEvents();
   purgeExpiredTrash();
+  // ล้างของซ้ำที่ค้างอยู่ (จากการนำเข้า/ซิงค์หลายเครื่อง) แล้วเซฟ
+  {
+    const before = state.data.shoes.length + state.data.runs.length;
+    state.data = dedupeData(state.data);
+    if (state.data.shoes.length + state.data.runs.length !== before) saveData();
+  }
   renderDashboard();
   renderShoeList();
   renderDetail();

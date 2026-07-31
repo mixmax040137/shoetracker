@@ -167,6 +167,15 @@
       </section>
 
       <section class="settings-card">
+        <h3>นำเข้าจาก Strava (ไฟล์ export)</h3>
+        <p class="muted">ลากไฟล์ <code>activities.csv</code> จาก Strava export มาที่นี่ได้เลย — สร้างรองเท้าจาก
+        Activity Gear อัตโนมัติ, จับคู่การวิ่ง+เดิน, แปลงหน่วย, ตัดจักรยาน/ว่ายน้ำ/เวทออก และ
+        <b>กันซ้ำด้วย Activity ID</b> (นำเข้าซ้ำได้ เพิ่มเฉพาะของใหม่)</p>
+        <input type="file" id="stravaCsvInput" accept=".csv,text/csv">
+        <p class="hint" id="stravaCsvResult"></p>
+      </section>
+
+      <section class="settings-card">
         <h3>ข้อมูลของคุณ</h3>
         <p class="muted">ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์นี้เท่านั้น (localStorage) ยังไม่ซิงค์ข้ามอุปกรณ์ —
         "นำเข้า/กู้คืน" จะรวมข้อมูลจากไฟล์เข้ากับที่มีอยู่ โดยไม่เพิ่มรายการซ้ำ</p>
