@@ -11,6 +11,7 @@ const CONFIG = {
 };
 
 const STORAGE_KEY = "shoetracker_data_v1";
+const THEME_KEY = "shoetracker_theme";
 const STRAVA_TOKEN_KEY = "shoetracker_strava_tokens_v1";
 const SYNC_ENDPOINT_KEY = "shoetracker_sync_endpoint";
 const SYNC_CODE_KEY = "shoetracker_sync_code";
@@ -20,17 +21,87 @@ let cloudPushTimer = null;
 let suppressCloudPush = false; // กันไม่ให้ตอน "ดึงจากคลาวด์" แล้วเซฟ ไปสั่งสำรองซ้ำทันที
 
 /* ---------------------------------------------------------------
+ * ธีม (กลางวัน / กลางคืน / ตามระบบ)
+ * ------------------------------------------------------------- */
+const THEME_ORDER = ["auto", "light", "dark"];
+const THEME_ICON = { auto: "🌗", light: "☀️", dark: "🌙" };
+const THEME_META = { light: "#f4f5f7", dark: "#0f1113" };
+
+function getTheme() {
+  const t = localStorage.getItem(THEME_KEY);
+  return t === "light" || t === "dark" ? t : "auto";
+}
+
+function applyTheme(mode) {
+  if (mode === "light" || mode === "dark") {
+    document.documentElement.setAttribute("data-theme", mode);
+    localStorage.setItem(THEME_KEY, mode);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.removeItem(THEME_KEY);
+  }
+  updateThemeUI(mode);
+}
+
+/* โทนสีจริงที่แสดง (ใช้ตั้งไอคอน/สีแถบเบราว์เซอร์) */
+function effectiveTheme(mode) {
+  if (mode === "light" || mode === "dark") return mode;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function updateThemeUI(mode) {
+  const btn = document.getElementById("themeToggle");
+  if (btn) btn.textContent = THEME_ICON[mode] || "🌗";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", THEME_META[effectiveTheme(mode)]);
+  document.querySelectorAll("#themeSeg button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.themeChoice === mode);
+  });
+}
+
+function cycleTheme() {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(getTheme()) + 1) % THEME_ORDER.length];
+  applyTheme(next);
+}
+
+/* ---------------------------------------------------------------
  * ชั้นข้อมูล (localStorage)
  * ------------------------------------------------------------- */
+function emptyData() {
+  return { shoes: [], runs: [], deleted: { shoes: {}, runs: {} } };
+}
+
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { shoes: [], runs: [] };
+    if (!raw) return emptyData();
     const parsed = JSON.parse(raw);
-    return { shoes: parsed.shoes || [], runs: parsed.runs || [] };
+    const del = parsed.deleted || {};
+    return {
+      shoes: parsed.shoes || [],
+      runs: parsed.runs || [],
+      deleted: { shoes: del.shoes || {}, runs: del.runs || {} },
+    };
   } catch (e) {
-    return { shoes: [], runs: [] };
+    return emptyData();
   }
+}
+
+/* เวลาปัจจุบัน (ms) — ใช้ทำ updatedAt สำหรับ sync แบบผสานข้อมูล */
+function nowTs() {
+  return Date.now();
+}
+
+/* ประทับเวลาแก้ไขล่าสุดให้เรคคอร์ด (ให้ฝั่ง sync เลือกเวอร์ชันใหม่สุด) */
+function touch(rec) {
+  rec.updatedAt = nowTs();
+  return rec;
+}
+
+/* บันทึก tombstone ว่าเรคคอร์ดถูกลบเมื่อไร (กันไม่ให้ sync ปลุกกลับมา) */
+function tombstone(kind, id) {
+  if (!state.data.deleted) state.data.deleted = { shoes: {}, runs: {} };
+  state.data.deleted[kind][id] = nowTs();
 }
 
 function saveData() {
@@ -130,6 +201,8 @@ const state = {
   runTargetShoeId: null,
   runPhoto: null, // รูปในโมดัลบันทึกการวิ่ง (data URL) หรือ null
   runCoords: null, // {lat, lng} จากปุ่มตำแหน่งปัจจุบัน หรือ null
+  syncing: false, // กันไม่ให้ซิงค์ซ้อนกัน
+  pollTimer: null, // ตัวจับเวลาดึงข้อมูลอัตโนมัติ
 };
 
 /* ---------------------------------------------------------------
@@ -247,6 +320,7 @@ function renderDetail() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (!confirm("ลบการวิ่งนี้หรือไม่?")) return;
+      tombstone("runs", btn.dataset.id);
       state.data.runs = state.data.runs.filter((r) => r.id !== btn.dataset.id);
       saveData();
       renderShoeList();
@@ -410,6 +484,7 @@ function saveShoeFromModal() {
   const fields = {
     name, brand, category, startingDistanceKm, size, color,
     purchaseDate, price, mileageTargetKm, notes, photo: state.editingPhoto,
+    updatedAt: nowTs(),
   };
 
   if (state.editingShoeId) {
@@ -544,6 +619,7 @@ function saveRunFromModal() {
     source: "manual",
     externalId: null,
     createdAt: new Date().toISOString(),
+    updatedAt: nowTs(),
   });
   saveData();
   closeRunModal();
@@ -599,6 +675,7 @@ function renderUnassignedModal() {
       if (!sel.value) return;
       const run = state.data.runs.find((r) => r.id === sel.dataset.id);
       run.shoeId = sel.value;
+      touch(run);
       saveData();
       renderUnassignedModal();
       renderShoeList();
@@ -674,6 +751,7 @@ function parseCsvRuns(text, shoeId) {
       source: "csv",
       externalId: null,
       createdAt: new Date().toISOString(),
+      updatedAt: nowTs(),
     });
   }
   return result;
@@ -824,6 +902,7 @@ async function syncStrava() {
           startingDistanceKm: 0,
           isRetired: false,
           dateAdded: new Date().toISOString(),
+          updatedAt: nowTs(),
         };
         state.data.shoes.push(shoe);
       }
@@ -851,6 +930,7 @@ async function syncStrava() {
         source: "strava",
         externalId,
         createdAt: new Date().toISOString(),
+        updatedAt: nowTs(),
       });
       added++;
     }
@@ -1078,6 +1158,7 @@ function restoreFromJson(obj) {
         photo: inS.photo || null,
         isRetired: !!inS.isRetired,
         dateAdded: inS.dateAdded || new Date().toISOString(),
+        updatedAt: nowTs(),
       };
       state.data.shoes.push(newShoe);
       nameToId[key] = newShoe.id;
@@ -1107,6 +1188,7 @@ function restoreFromJson(obj) {
       source: inR.source || "manual",
       externalId: inR.externalId || null,
       createdAt: new Date().toISOString(),
+      updatedAt: nowTs(),
     });
     if (inR.externalId) existingExt.add(inR.externalId);
     addedRuns++;
@@ -1184,31 +1266,120 @@ function renderSyncStatus() {
   );
 }
 
+/* หลังข้อมูลเปลี่ยน → ตั้งเวลาให้ซิงค์กับคลาวด์ (debounce กันยิงถี่) */
 function scheduleCloudPush() {
   if (suppressCloudPush || !syncConfigured()) return;
   clearTimeout(cloudPushTimer);
-  cloudPushTimer = setTimeout(pushToCloud, 1500);
+  cloudPushTimer = setTimeout(() => cloudSync("change"), 1200);
 }
 
-async function pushToCloud() {
-  const cfg = getSyncConfig();
-  if (!cfg.endpoint || !cfg.code) return;
-  setSyncStatus("กำลังสำรองขึ้นคลาวด์…");
+/* ---- ผสานข้อมูล (สำรองไว้เผื่อ backend รุ่นเก่าที่ไม่มี action "sync") ---- */
+function mergeDeletedMap(a, b) {
+  const out = Object.assign({}, a || {});
+  Object.entries(b || {}).forEach(([id, ts]) => {
+    if (out[id] == null || out[id] < ts) out[id] = ts;
+  });
+  return out;
+}
+
+function mergeCollection(localArr, remoteArr, tomb) {
+  const byId = new Map();
+  const consider = (rec) => {
+    if (!rec || rec.id == null) return;
+    const u = Number(rec.updatedAt) || 0;
+    const t = tomb[rec.id];
+    if (t != null && t >= u) return; // ถูกลบหลังเวอร์ชันนี้
+    const ex = byId.get(rec.id);
+    if (!ex || (Number(ex.updatedAt) || 0) < u) byId.set(rec.id, rec);
+  };
+  (remoteArr || []).forEach(consider);
+  (localArr || []).forEach(consider);
+  return Array.from(byId.values());
+}
+
+function mergeData(local, remote) {
+  local = local || {};
+  remote = remote || {};
+  const dShoes = mergeDeletedMap((local.deleted || {}).shoes, (remote.deleted || {}).shoes);
+  const dRuns = mergeDeletedMap((local.deleted || {}).runs, (remote.deleted || {}).runs);
+  return {
+    shoes: mergeCollection(local.shoes, remote.shoes, dShoes),
+    runs: mergeCollection(local.runs, remote.runs, dRuns),
+    deleted: { shoes: dShoes, runs: dRuns },
+  };
+}
+
+/* นำผลลัพธ์ที่ผสานแล้วมาแทนที่ข้อมูลในเครื่อง แล้ววาดหน้าจอใหม่ (ไม่ยิงซิงค์ซ้ำ) */
+function applyMerged(merged) {
+  const del = merged.deleted || {};
+  state.data = {
+    shoes: merged.shoes || [],
+    runs: merged.runs || [],
+    deleted: { shoes: del.shoes || {}, runs: del.runs || {} },
+  };
+  suppressCloudPush = true;
   try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  } catch (e) {}
+  suppressCloudPush = false;
+
+  if (state.selectedShoeId && !state.data.shoes.some((s) => s.id === state.selectedShoeId)) {
+    state.selectedShoeId = null;
+    backToList();
+  }
+  renderDashboard();
+  renderShoeList();
+  renderDetail();
+  renderSettingsCsvOptions();
+}
+
+/* ซิงค์กับคลาวด์: ส่งข้อมูลในเครื่องไปให้เซิร์ฟเวอร์ผสาน แล้วรับชุดที่รวมแล้วกลับมา
+   เซิร์ฟเวอร์ผสานแบบ atomic (มี lock) จึงไม่ทับข้อมูลของเครื่องอื่นที่แก้พร้อมกัน */
+async function cloudSync(reason) {
+  const cfg = getSyncConfig();
+  if (!cfg.endpoint || !cfg.code || state.syncing) return;
+  state.syncing = true;
+  if (reason !== "poll") setSyncStatus("กำลังซิงค์กับคลาวด์…");
+  try {
+    let merged;
     const res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" }, // เลี่ยง CORS preflight กับ Apps Script
-      body: JSON.stringify({ action: "save", syncCode: cfg.code, data: state.data }),
+      body: JSON.stringify({ action: "sync", syncCode: cfg.code, data: state.data }),
     });
     const json = await res.json();
-    if (json.status !== "ok") throw new Error(json.message || "สำรองไม่สำเร็จ");
-    localStorage.setItem(SYNC_LAST_KEY, json.updatedAt || new Date().toISOString());
-    setSyncStatus("สำรองล่าสุด: " + new Date().toLocaleString("th-TH"));
+
+    if (json.status === "ok" && json.data) {
+      merged = json.data; // เซิร์ฟเวอร์ผสานให้แล้ว
+    } else if (json.message && /unknown action/i.test(json.message)) {
+      // backend รุ่นเก่า: โหลด → ผสานในเครื่อง → เซฟกลับ
+      const loadRes = await fetch(cfg.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "load", syncCode: cfg.code }),
+      });
+      const loadJson = await loadRes.json();
+      merged = mergeData(state.data, loadJson.data || {});
+      await fetch(cfg.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "save", syncCode: cfg.code, data: merged }),
+      });
+    } else {
+      throw new Error(json.message || "ซิงค์ไม่สำเร็จ");
+    }
+
+    applyMerged(merged);
+    localStorage.setItem(SYNC_LAST_KEY, new Date().toISOString());
+    renderSyncStatus();
   } catch (err) {
-    setSyncStatus("สำรองไม่สำเร็จ: " + err.message, true);
+    setSyncStatus("ซิงค์ไม่สำเร็จ: " + err.message, true);
+  } finally {
+    state.syncing = false;
   }
 }
 
+/* ดึงจากคลาวด์แบบแทนที่ทั้งหมด (ปุ่มฉุกเฉิน — ใช้ตอนอยากล้างเครื่องแล้วเอาของคลาวด์) */
 async function pullFromCloud() {
   const cfg = getSyncConfig();
   if (!cfg.endpoint || !cfg.code) {
@@ -1228,24 +1399,30 @@ async function pullFromCloud() {
     const cloud = json.data;
     const hasData = cloud && ((cloud.shoes || []).length || (cloud.runs || []).length);
     if (!hasData) {
-      setSyncStatus("ยังไม่มีข้อมูลบนคลาวด์สำหรับรหัสนี้ (ลองกด “สำรองขึ้นคลาวด์” จากเครื่องที่มีข้อมูลก่อน)", true);
+      setSyncStatus("ยังไม่มีข้อมูลบนคลาวด์สำหรับรหัสนี้ (แก้ข้อมูลสักครั้งเพื่อสำรองขึ้นไปก่อน)", true);
       return;
     }
-
-    suppressCloudPush = true;
-    state.data = { shoes: cloud.shoes || [], runs: cloud.runs || [] };
-    saveData();
-    suppressCloudPush = false;
-
-    state.selectedShoeId = null;
-    backToList();
-    renderShoeList();
-    renderDetail();
-    renderSettingsCsvOptions();
+    applyMerged(cloud);
     localStorage.setItem(SYNC_LAST_KEY, json.updatedAt || new Date().toISOString());
     setSyncStatus("ดึงข้อมูลจากคลาวด์สำเร็จ · อัปเดตเมื่อ " + new Date().toLocaleString("th-TH"));
   } catch (err) {
     setSyncStatus("ดึงไม่สำเร็จ: " + err.message, true);
+  }
+}
+
+/* ดึงข้อมูลอัตโนมัติเป็นระยะ ๆ ระหว่างเปิดแอพ (near-realtime) */
+const SYNC_POLL_MS = 15000;
+function startSyncPolling() {
+  stopSyncPolling();
+  if (!syncConfigured()) return;
+  state.pollTimer = setInterval(() => {
+    if (document.visibilityState === "visible") cloudSync("poll");
+  }, SYNC_POLL_MS);
+}
+function stopSyncPolling() {
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
   }
 }
 
@@ -1266,6 +1443,25 @@ function bindEvents() {
     const btn = e.target.closest(".tab-btn");
     if (btn) switchTab(btn.dataset.tab);
   });
+
+  // ---- ธีม ----
+  document.getElementById("themeToggle").addEventListener("click", cycleTheme);
+  document.getElementById("themeSeg").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-theme-choice]");
+    if (btn) applyTheme(btn.dataset.themeChoice);
+  });
+  if (window.matchMedia) {
+    // ระบบสลับ light/dark ระหว่างใช้งาน → อัปเดตไอคอน/สีแถบเมื่ออยู่โหมด "ตามระบบ"
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (getTheme() === "auto") updateThemeUI("auto");
+    });
+  }
+
+  // ---- ซิงค์อัตโนมัติเมื่อกลับมาที่แท็บ / กลับมาออนไลน์ ----
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") cloudSync("focus");
+  });
+  window.addEventListener("online", () => cloudSync("online"));
 
   document.getElementById("dashPrevMonth").addEventListener("click", () => {
     state.dashMonth = new Date(state.dashMonth.getFullYear(), state.dashMonth.getMonth() - 1, 1);
@@ -1334,6 +1530,7 @@ function bindEvents() {
     document.getElementById("detailMenu").classList.add("hidden");
     const shoe = state.data.shoes.find((s) => s.id === state.selectedShoeId);
     shoe.isRetired = !shoe.isRetired;
+    touch(shoe);
     saveData();
     renderShoeList();
     renderDetail();
@@ -1342,6 +1539,10 @@ function bindEvents() {
     document.getElementById("detailMenu").classList.add("hidden");
     if (!confirm("ลบรองเท้านี้และประวัติการวิ่งทั้งหมดของมันหรือไม่?")) return;
     const id = state.selectedShoeId;
+    tombstone("shoes", id);
+    state.data.runs.forEach((r) => {
+      if (r.shoeId === id) tombstone("runs", r.id);
+    });
     state.data.shoes = state.data.shoes.filter((s) => s.id !== id);
     state.data.runs = state.data.runs.filter((r) => r.shoeId !== id);
     saveData();
@@ -1384,10 +1585,12 @@ function bindEvents() {
   endpointInput.addEventListener("input", () => {
     localStorage.setItem(SYNC_ENDPOINT_KEY, endpointInput.value.trim());
     renderSyncStatus();
+    startSyncPolling();
   });
   codeInput.addEventListener("input", () => {
     localStorage.setItem(SYNC_CODE_KEY, codeInput.value.trim());
     renderSyncStatus();
+    startSyncPolling();
   });
   document.getElementById("syncGenCodeBtn").addEventListener("click", () => {
     const code = generateSyncCode();
@@ -1408,7 +1611,7 @@ function bindEvents() {
       setSyncStatus("ใส่ Apps Script URL และรหัสซิงค์ให้ครบก่อน", true);
       return;
     }
-    pushToCloud();
+    cloudSync("manual");
   });
   document.getElementById("syncPullBtn").addEventListener("click", () => {
     if (!syncConfigured()) {
@@ -1429,10 +1632,10 @@ function initSyncUI() {
   document.getElementById("syncCodeInput").value = cfg.code;
   renderSyncStatus();
 
-  // เบราว์เซอร์ใหม่ (ยังไม่มีข้อมูลในเครื่อง) + ตั้งค่าซิงค์ไว้แล้ว → ดึงข้อมูลให้อัตโนมัติ
-  const localEmpty = !state.data.shoes.length && !state.data.runs.length;
-  if (syncConfigured() && localEmpty) {
-    pullFromCloud();
+  // ตั้งค่าซิงค์ไว้แล้ว → ซิงค์ทันทีตอนเปิด แล้วดึงอัตโนมัติเป็นระยะ
+  if (syncConfigured()) {
+    cloudSync("init");
+    startSyncPolling();
   }
 }
 
@@ -1440,6 +1643,7 @@ function initSyncUI() {
  * เริ่มต้นแอพ
  * ------------------------------------------------------------- */
 async function init() {
+  applyTheme(getTheme());
   bindEvents();
   renderDashboard();
   renderShoeList();

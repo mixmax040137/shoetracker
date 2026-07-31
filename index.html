@@ -3,19 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f5f7">
 <title>ShoeTracker — บันทึกระยะทางวิ่งของรองเท้า</title>
 <link rel="stylesheet" href="styles.css">
+<script>
+  // ตั้งธีมก่อนวาดหน้า เพื่อไม่ให้จอกระพริบ (flash) ตอนโหลด
+  try {
+    var t = localStorage.getItem("shoetracker_theme");
+    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 </head>
 <body>
 <div id="app">
 
   <header class="topbar">
     <h1>👟 ShoeTracker</h1>
-    <nav class="tabs" id="mainTabs">
-      <button class="tab-btn active" data-tab="dashboard">แดชบอร์ด</button>
-      <button class="tab-btn" data-tab="shoes">รองเท้า</button>
-      <button class="tab-btn" data-tab="settings">ตั้งค่า</button>
-    </nav>
+    <div class="topbar-right">
+      <nav class="tabs" id="mainTabs">
+        <button class="tab-btn active" data-tab="dashboard">แดชบอร์ด</button>
+        <button class="tab-btn" data-tab="shoes">รองเท้า</button>
+        <button class="tab-btn" data-tab="settings">ตั้งค่า</button>
+      </nav>
+      <button id="themeToggle" class="icon-btn theme-toggle" title="สลับธีม" aria-label="สลับธีม">🌗</button>
+    </div>
   </header>
 
   <!-- ===== แท็บแดชบอร์ด ===== -->
@@ -102,6 +113,16 @@
       <h2>ตั้งค่า</h2>
 
       <section class="settings-card">
+        <h3>ธีม (หน้าตา)</h3>
+        <p class="muted">เลือก “ตามระบบ” เพื่อสลับกลางวัน/กลางคืนอัตโนมัติตามอุปกรณ์ หรือกำหนดเองก็ได้</p>
+        <div class="seg" id="themeSeg">
+          <button data-theme-choice="auto">🌗 ตามระบบ</button>
+          <button data-theme-choice="light">☀️ กลางวัน</button>
+          <button data-theme-choice="dark">🌙 กลางคืน</button>
+        </div>
+      </section>
+
+      <section class="settings-card">
         <h3>Strava</h3>
         <p class="muted" id="stravaStatus">ยังไม่ได้เชื่อมต่อ</p>
         <div class="btn-row">
@@ -143,10 +164,11 @@
       </section>
 
       <section class="settings-card">
-        <h3>ซิงค์ / สำรองข้อมูลออนไลน์</h3>
-        <p class="muted">สำรองข้อมูลขึ้น Google Drive ของคุณเองผ่าน Apps Script เมื่อตั้งค่าแล้ว
-        แอพจะสำรองให้อัตโนมัติทุกครั้งที่ข้อมูลเปลี่ยน เปิดเบราว์เซอร์/เครื่องอื่นแล้วใส่
-        <b>รหัสซิงค์เดียวกัน</b> ก็จะได้ข้อมูลชุดเดียวกัน (ดูวิธีตั้งค่าใน <code>apps-script/SyncBackend.gs</code>)</p>
+        <h3>ซิงค์ / สำรองข้อมูลออนไลน์ (อัตโนมัติ)</h3>
+        <p class="muted">สำรองขึ้น Google Drive ของคุณเองผ่าน Apps Script เมื่อตั้งค่าแล้ว แอพจะ
+        <b>ซิงค์ให้เองอัตโนมัติ</b> — ทั้งตอนแก้ข้อมูล, ตอนเปิดแอพ, ตอนสลับกลับมาที่แท็บ และทุก ๆ 15 วินาที
+        ทุกเครื่องที่ใช้ <b>รหัสซิงค์เดียวกัน</b> จะเห็นข้อมูลชุดเดียวกันแบบเรียลไทม์ โดยไม่ต้องกดอัปโหลดเอง
+        และข้อมูลจะถูกผสานอย่างปลอดภัย (แก้คนละเครื่องพร้อมกันก็ไม่หาย) — ดูวิธีตั้งค่าใน <code>apps-script/SyncBackend.gs</code></p>
 
         <label class="field-label">Apps Script URL
           <input type="text" id="syncEndpointInput" placeholder="https://script.google.com/macros/s/.../exec">
@@ -159,7 +181,7 @@
           <button id="syncCopyCodeBtn" class="ghost-btn">คัดลอกรหัส</button>
         </div>
         <div class="btn-row">
-          <button id="syncPushBtn" class="primary-btn">สำรองขึ้นคลาวด์เดี๋ยวนี้</button>
+          <button id="syncPushBtn" class="primary-btn">ซิงค์เดี๋ยวนี้</button>
           <button id="syncPullBtn" class="ghost-btn">ดึงจากคลาวด์ (แทนที่ข้อมูลในเครื่อง)</button>
         </div>
         <p class="hint" id="syncStatus"></p>

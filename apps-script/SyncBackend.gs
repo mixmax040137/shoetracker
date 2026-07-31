@@ -41,6 +41,13 @@ function doPost(e) {
       var r = readData_(code);
       return json_({ status: "ok", data: r.data, updatedAt: r.updatedAt });
     }
+    // ผสานข้อมูลฝั่งเซิร์ฟเวอร์แบบ atomic (อยู่ใต้ lock อยู่แล้ว) — กันหลายเครื่องทับกัน
+    if (body.action === "sync") {
+      var cur = readData_(code).data;
+      var merged = mergeData_(cur, body.data);
+      writeData_(code, merged);
+      return json_({ status: "ok", data: merged, updatedAt: new Date().toISOString() });
+    }
     return json_({ status: "error", message: "unknown action: " + body.action });
   } catch (err) {
     return json_({ status: "error", message: String(err) });
@@ -87,6 +94,59 @@ function readData_(code) {
   } catch (e) {
     return { data: null, updatedAt: null };
   }
+}
+
+/* ---- ผสานข้อมูล 2 ชุด: เลือกเรคคอร์ดที่ updatedAt ใหม่กว่า + เคารพ tombstone ---- */
+function mergeData_(a, b) {
+  a = a || {};
+  b = b || {};
+  var dShoes = mergeDeleted_((a.deleted || {}).shoes, (b.deleted || {}).shoes);
+  var dRuns = mergeDeleted_((a.deleted || {}).runs, (b.deleted || {}).runs);
+  // ตัด tombstone ที่เก่ากว่า 60 วันทิ้ง เพื่อไม่ให้ข้อมูลบวมไปเรื่อย ๆ
+  var cutoff = Date.now() - 60 * 24 * 3600 * 1000;
+  dShoes = prune_(dShoes, cutoff);
+  dRuns = prune_(dRuns, cutoff);
+  return {
+    shoes: mergeCol_(a.shoes, b.shoes, dShoes),
+    runs: mergeCol_(a.runs, b.runs, dRuns),
+    deleted: { shoes: dShoes, runs: dRuns }
+  };
+}
+
+function mergeDeleted_(a, b) {
+  var out = {};
+  var k;
+  a = a || {};
+  b = b || {};
+  for (k in a) if (a.hasOwnProperty(k)) out[k] = a[k];
+  for (k in b) if (b.hasOwnProperty(k)) { if (out[k] == null || out[k] < b[k]) out[k] = b[k]; }
+  return out;
+}
+
+function prune_(map, cutoff) {
+  var out = {};
+  for (var k in map) if (map.hasOwnProperty(k)) { if (map[k] >= cutoff) out[k] = map[k]; }
+  return out;
+}
+
+function mergeCol_(arrA, arrB, tomb) {
+  var byId = {};
+  function consider(rec) {
+    if (!rec || rec.id == null) return;
+    var u = Number(rec.updatedAt) || 0;
+    var t = tomb[rec.id];
+    if (t != null && t >= u) return; // ถูกลบหลังเวอร์ชันนี้
+    var ex = byId[rec.id];
+    if (!ex || (Number(ex.updatedAt) || 0) < u) byId[rec.id] = rec;
+  }
+  var i;
+  arrA = arrA || [];
+  arrB = arrB || [];
+  for (i = 0; i < arrA.length; i++) consider(arrA[i]);
+  for (i = 0; i < arrB.length; i++) consider(arrB[i]);
+  var out = [];
+  for (var id in byId) if (byId.hasOwnProperty(id)) out.push(byId[id]);
+  return out;
 }
 
 function json_(obj) {
