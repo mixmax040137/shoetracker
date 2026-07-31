@@ -3,7 +3,7 @@
  *  - ตอบจากแคชทันที (เร็ว/ออฟไลน์ได้) แล้วอัปเดตแคชเบื้องหลังสำหรับครั้งถัดไป
  *  - คำขอข้ามโดเมน (เช่น ซิงค์ไป Apps Script) และที่ไม่ใช่ GET จะปล่อยผ่านไปเน็ตเสมอ
  */
-const CACHE = "shoetracker-v1";
+const CACHE = "shoetracker-v2";
 const ASSETS = [
   "./",
   "./index.html",
