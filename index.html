@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f4f5f7">
 <title>ShoeTracker — บันทึกระยะทางวิ่งของรองเท้า</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ShoeTracker">
 <link rel="stylesheet" href="styles.css">
 <script>
   // ตั้งธีมก่อนวาดหน้า เพื่อไม่ให้จอกระพริบ (flash) ตอนโหลด
@@ -120,6 +127,15 @@
           <button data-theme-choice="light">☀️ กลางวัน</button>
           <button data-theme-choice="dark">🌙 กลางคืน</button>
         </div>
+      </section>
+
+      <section class="settings-card" id="installCard">
+        <h3>ติดตั้งเป็นแอป 📲</h3>
+        <p class="muted">ติดตั้ง ShoeTracker ลงหน้าจอโฮม เปิดเต็มจอเหมือนแอปจริง และใช้ได้แม้ไม่มีเน็ต</p>
+        <div class="btn-row">
+          <button id="installBtn" class="primary-btn hidden">ติดตั้งแอปเดี๋ยวนี้</button>
+        </div>
+        <p class="hint" id="installHint"></p>
       </section>
 
       <section class="settings-card">

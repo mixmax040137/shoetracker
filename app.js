@@ -1775,10 +1775,69 @@ function initSyncUI() {
 }
 
 /* ---------------------------------------------------------------
+ * PWA — ลง Service Worker (ออฟไลน์) + ปุ่มติดตั้งลงหน้าจอโฮม
+ * ------------------------------------------------------------- */
+let deferredInstallPrompt = null;
+
+function isStandalone() {
+  return (
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+    window.navigator.standalone === true
+  );
+}
+
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+
+function setupPWA() {
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+
+  const btn = document.getElementById("installBtn");
+  const hint = document.getElementById("installHint");
+
+  if (isStandalone()) {
+    hint.textContent = "✓ ติดตั้งแล้ว — คุณกำลังใช้งานแบบแอป";
+    return;
+  }
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    btn.classList.remove("hidden");
+    hint.textContent = "";
+  });
+
+  btn.addEventListener("click", async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    btn.classList.add("hidden");
+    hint.textContent = outcome === "accepted" ? "กำลังติดตั้ง…" : "ยกเลิกการติดตั้งไปแล้ว";
+  });
+
+  window.addEventListener("appinstalled", () => {
+    btn.classList.add("hidden");
+    hint.textContent = "✓ ติดตั้งสำเร็จ! เปิดจากไอคอนบนหน้าจอโฮมได้เลย";
+  });
+
+  if (isIOS()) {
+    hint.innerHTML =
+      'บน iPhone/iPad: เปิดใน <b>Safari</b> → กดปุ่ม <b>แชร์</b> (ไอคอนสี่เหลี่ยมมีลูกศรขึ้น) → เลือก <b>“เพิ่มลงในหน้าจอโฮม”</b>';
+  }
+}
+
+/* ---------------------------------------------------------------
  * เริ่มต้นแอพ
  * ------------------------------------------------------------- */
 async function init() {
   applyTheme(getTheme());
+  setupPWA();
   bindEvents();
   purgeExpiredTrash();
   renderDashboard();
