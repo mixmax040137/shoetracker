@@ -154,8 +154,20 @@ function uid() {
 
 const DEFAULT_TARGET_KM = 500;
 
+const TRASH_TTL_MS = 30 * 24 * 3600 * 1000; // เก็บในถังขยะ 30 วันก่อนลบถาวร
+
+function isShoeTrashed(id) {
+  const s = state.data.shoes.find((x) => x.id === id);
+  return !!(s && s.trashedAt);
+}
+
+/* การวิ่งที่ยัง "ใช้งานอยู่" — ไม่อยู่ในถังขยะ และรองเท้าที่ผูกไว้ก็ไม่อยู่ในถังขยะ */
+function activeRuns() {
+  return state.data.runs.filter((r) => !r.trashedAt && !isShoeTrashed(r.shoeId));
+}
+
 function totalDistance(shoe) {
-  const runs = state.data.runs.filter((r) => r.shoeId === shoe.id);
+  const runs = state.data.runs.filter((r) => r.shoeId === shoe.id && !r.trashedAt);
   const sum = runs.reduce((acc, r) => acc + (Number(r.distanceKm) || 0), 0);
   return (Number(shoe.startingDistanceKm) || 0) + sum;
 }
@@ -180,12 +192,12 @@ function fmtKm(n) {
 
 function shoeRuns(shoeId) {
   return state.data.runs
-    .filter((r) => r.shoeId === shoeId)
+    .filter((r) => r.shoeId === shoeId && !r.trashedAt)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
 function unassignedRuns() {
-  return state.data.runs.filter((r) => !r.shoeId);
+  return state.data.runs.filter((r) => !r.shoeId && !r.trashedAt);
 }
 
 /* ---------------------------------------------------------------
@@ -214,9 +226,9 @@ function renderShoeList() {
   const retiredSection = document.getElementById("retiredSection");
 
   const active = state.data.shoes
-    .filter((s) => !s.isRetired)
+    .filter((s) => !s.isRetired && !s.trashedAt)
     .sort((a, b) => totalDistance(b) - totalDistance(a));
-  const retired = state.data.shoes.filter((s) => s.isRetired);
+  const retired = state.data.shoes.filter((s) => s.isRetired && !s.trashedAt);
 
   activeEl.innerHTML = active.length
     ? active.map(shoeCardHtml).join("")
@@ -319,12 +331,14 @@ function renderDetail() {
   runListEl.querySelectorAll(".run-delete").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (!confirm("ลบการวิ่งนี้หรือไม่?")) return;
-      tombstone("runs", btn.dataset.id);
-      state.data.runs = state.data.runs.filter((r) => r.id !== btn.dataset.id);
+      const run = state.data.runs.find((r) => r.id === btn.dataset.id);
+      if (!run) return;
+      run.trashedAt = nowTs();
+      touch(run);
       saveData();
       renderShoeList();
       renderDetail();
+      renderTrash();
     });
   });
 }
@@ -689,10 +703,107 @@ function renderUnassignedModal() {
  * ------------------------------------------------------------- */
 function renderSettingsCsvOptions() {
   const sel = document.getElementById("csvShoeSelect");
-  const shoes = state.data.shoes.filter((s) => !s.isRetired);
+  const shoes = state.data.shoes.filter((s) => !s.isRetired && !s.trashedAt);
   sel.innerHTML = shoes.length
     ? shoes.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("")
     : `<option value="">(ยังไม่มีรองเท้า — เพิ่มก่อน)</option>`;
+}
+
+/* ---------------------------------------------------------------
+ * ถังขยะ — ลบแบบกู้คืนได้ (soft-delete) เก็บ 30 วันก่อนลบถาวร
+ * ------------------------------------------------------------- */
+function permanentlyDeleteRun(id) {
+  tombstone("runs", id);
+  state.data.runs = state.data.runs.filter((r) => r.id !== id);
+}
+
+function permanentlyDeleteShoe(id) {
+  tombstone("shoes", id);
+  state.data.runs.forEach((r) => {
+    if (r.shoeId === id) tombstone("runs", r.id);
+  });
+  state.data.runs = state.data.runs.filter((r) => r.shoeId !== id);
+  state.data.shoes = state.data.shoes.filter((s) => s.id !== id);
+}
+
+function restoreFromTrash(kind, id) {
+  const rec = (kind === "shoes" ? state.data.shoes : state.data.runs).find((x) => x.id === id);
+  if (!rec) return;
+  delete rec.trashedAt;
+  touch(rec);
+}
+
+/* ลบถาวรอัตโนมัติสำหรับรายการที่อยู่ในถังขยะเกิน 30 วัน */
+function purgeExpiredTrash() {
+  const cutoff = nowTs() - TRASH_TTL_MS;
+  const oldShoes = state.data.shoes.filter((s) => s.trashedAt && s.trashedAt < cutoff);
+  const oldRuns = state.data.runs.filter((r) => r.trashedAt && r.trashedAt < cutoff && !oldShoes.some((s) => s.id === r.shoeId));
+  if (!oldShoes.length && !oldRuns.length) return;
+  oldShoes.forEach((s) => permanentlyDeleteShoe(s.id));
+  oldRuns.forEach((r) => permanentlyDeleteRun(r.id));
+  saveData();
+}
+
+function daysLeftLabel(trashedAt) {
+  const left = Math.ceil((trashedAt + TRASH_TTL_MS - nowTs()) / (24 * 3600 * 1000));
+  return left > 0 ? `ลบถาวรในอีก ${left} วัน` : "กำลังจะลบถาวร";
+}
+
+function renderTrash() {
+  const listEl = document.getElementById("trashList");
+  const countEl = document.getElementById("trashCount");
+  const emptyBtn = document.getElementById("emptyTrashBtn");
+  if (!listEl) return;
+
+  const tShoes = state.data.shoes.filter((s) => s.trashedAt).sort((a, b) => b.trashedAt - a.trashedAt);
+  const tRuns = state.data.runs.filter((r) => r.trashedAt && !isShoeTrashed(r.shoeId)).sort((a, b) => b.trashedAt - a.trashedAt);
+  const total = tShoes.length + tRuns.length;
+
+  countEl.textContent = total ? `(${total})` : "";
+  emptyBtn.classList.toggle("hidden", !total);
+
+  if (!total) {
+    listEl.innerHTML = `<p class="empty-list">ถังขยะว่างเปล่า</p>`;
+    return;
+  }
+
+  const shoeRow = (s) => `
+    <div class="trash-row" data-kind="shoes" data-id="${s.id}">
+      <div class="trash-main">
+        <div class="trash-title">👟 ${escapeHtml(s.name)}${s.brand ? ` · ${escapeHtml(s.brand)}` : ""}</div>
+        <div class="trash-sub">${daysLeftLabel(s.trashedAt)}</div>
+      </div>
+      <div class="trash-actions">
+        <button class="ghost-btn trash-restore">กู้คืน</button>
+        <button class="ghost-btn danger trash-purge">ลบถาวร</button>
+      </div>
+    </div>`;
+
+  const runRow = (r) => {
+    const dt = new Date(r.date).toLocaleDateString("th-TH", { dateStyle: "medium" });
+    return `
+    <div class="trash-row" data-kind="runs" data-id="${r.id}">
+      <div class="trash-main">
+        <div class="trash-title">🏃 ${Number(r.distanceKm).toFixed(1)} กม. · ${dt}</div>
+        <div class="trash-sub">${daysLeftLabel(r.trashedAt)}</div>
+      </div>
+      <div class="trash-actions">
+        <button class="ghost-btn trash-restore">กู้คืน</button>
+        <button class="ghost-btn danger trash-purge">ลบถาวร</button>
+      </div>
+    </div>`;
+  };
+
+  listEl.innerHTML = tShoes.map(shoeRow).join("") + tRuns.map(runRow).join("");
+}
+
+function afterTrashChange() {
+  saveData();
+  renderDashboard();
+  renderShoeList();
+  renderDetail();
+  renderSettingsCsvOptions();
+  renderTrash();
 }
 
 function handleCsvImport(file) {
@@ -961,7 +1072,7 @@ function inMonth(dateStr, y, m) {
 }
 
 function monthDistance(y, m) {
-  return state.data.runs
+  return activeRuns()
     .filter((r) => r.date && inMonth(r.date, y, m))
     .reduce((a, r) => a + (Number(r.distanceKm) || 0), 0);
 }
@@ -979,7 +1090,7 @@ function renderDashboard() {
   const atOrAfterNow = y > now.getFullYear() || (y === now.getFullYear() && m >= now.getMonth());
   document.getElementById("dashNextMonth").disabled = atOrAfterNow;
 
-  const monthRuns = state.data.runs.filter((r) => r.date && inMonth(r.date, y, m));
+  const monthRuns = activeRuns().filter((r) => r.date && inMonth(r.date, y, m));
   const totalKm = monthRuns.reduce((a, r) => a + (Number(r.distanceKm) || 0), 0);
   const totalMin = monthRuns.reduce((a, r) => a + (Number(r.durationMinutes) || 0), 0);
   const count = monthRuns.length;
@@ -1055,7 +1166,7 @@ function renderMonthChart() {
 function renderFleet() {
   const el = document.getElementById("dashFleet");
   const shoes = state.data.shoes
-    .filter((s) => !s.isRetired)
+    .filter((s) => !s.isRetired && !s.trashedAt)
     .map((s) => ({ s, dist: totalDistance(s), target: shoeTargetKm(s) }))
     .sort((a, b) => b.dist / b.target - a.dist / a.target);
 
@@ -1112,6 +1223,7 @@ function switchTab(tab) {
   document.getElementById("panel-shoes").classList.toggle("hidden", tab !== "shoes");
   document.getElementById("panel-settings").classList.toggle("hidden", tab !== "settings");
   if (tab === "dashboard") renderDashboard();
+  if (tab === "settings") renderTrash();
 }
 
 function exportData() {
@@ -1331,6 +1443,7 @@ function applyMerged(merged) {
   renderShoeList();
   renderDetail();
   renderSettingsCsvOptions();
+  renderTrash();
 }
 
 /* ซิงค์กับคลาวด์: ส่งข้อมูลในเครื่องไปให้เซิร์ฟเวอร์ผสาน แล้วรับชุดที่รวมแล้วกลับมา
@@ -1537,20 +1650,20 @@ function bindEvents() {
   });
   document.getElementById("deleteShoeBtn").addEventListener("click", () => {
     document.getElementById("detailMenu").classList.add("hidden");
-    if (!confirm("ลบรองเท้านี้และประวัติการวิ่งทั้งหมดของมันหรือไม่?")) return;
+    if (!confirm("ย้ายรองเท้านี้ไปถังขยะ? กู้คืนได้ภายใน 30 วัน (ดูในแท็บตั้งค่า › ถังขยะ)")) return;
     const id = state.selectedShoeId;
-    tombstone("shoes", id);
-    state.data.runs.forEach((r) => {
-      if (r.shoeId === id) tombstone("runs", r.id);
-    });
-    state.data.shoes = state.data.shoes.filter((s) => s.id !== id);
-    state.data.runs = state.data.runs.filter((r) => r.shoeId !== id);
+    const shoe = state.data.shoes.find((s) => s.id === id);
+    if (shoe) {
+      shoe.trashedAt = nowTs();
+      touch(shoe);
+    }
     saveData();
     state.selectedShoeId = null;
     backToList();
     renderShoeList();
     renderDetail();
     renderSettingsCsvOptions();
+    renderTrash();
   });
 
   document.getElementById("unassignedBanner").addEventListener("click", openUnassignedModal);
@@ -1578,6 +1691,28 @@ function bindEvents() {
     e.target.value = "";
   });
   document.getElementById("clearDataBtn").addEventListener("click", clearAllData);
+
+  // ---- ถังขยะ ----
+  document.getElementById("trashList").addEventListener("click", (e) => {
+    const row = e.target.closest(".trash-row");
+    if (!row) return;
+    const { kind, id } = row.dataset;
+    if (e.target.closest(".trash-restore")) {
+      restoreFromTrash(kind, id);
+      afterTrashChange();
+    } else if (e.target.closest(".trash-purge")) {
+      if (!confirm("ลบรายการนี้อย่างถาวร? กู้คืนไม่ได้อีก")) return;
+      if (kind === "shoes") permanentlyDeleteShoe(id);
+      else permanentlyDeleteRun(id);
+      afterTrashChange();
+    }
+  });
+  document.getElementById("emptyTrashBtn").addEventListener("click", () => {
+    if (!confirm("ลบทุกอย่างในถังขยะอย่างถาวร? กู้คืนไม่ได้อีก")) return;
+    state.data.shoes.filter((s) => s.trashedAt).forEach((s) => permanentlyDeleteShoe(s.id));
+    state.data.runs.filter((r) => r.trashedAt).forEach((r) => permanentlyDeleteRun(r.id));
+    afterTrashChange();
+  });
 
   // ---- ซิงค์ออนไลน์ ----
   const endpointInput = document.getElementById("syncEndpointInput");
@@ -1645,10 +1780,12 @@ function initSyncUI() {
 async function init() {
   applyTheme(getTheme());
   bindEvents();
+  purgeExpiredTrash();
   renderDashboard();
   renderShoeList();
   renderDetail();
   renderSettingsCsvOptions();
+  renderTrash();
   renderStravaStatus();
   initSyncUI();
   await handleStravaRedirectIfPresent();

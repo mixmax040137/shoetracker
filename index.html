@@ -164,6 +164,15 @@
       </section>
 
       <section class="settings-card">
+        <h3>ถังขยะ <span class="muted" id="trashCount"></span></h3>
+        <p class="muted">รองเท้า/การวิ่งที่ลบจะถูกย้ายมาที่นี่ เก็บไว้ 30 วันก่อนลบถาวร — กู้คืนได้ทุกเมื่อ และซิงค์ข้ามเครื่องเหมือนข้อมูลปกติ</p>
+        <div id="trashList" class="trash-list"></div>
+        <div class="btn-row">
+          <button id="emptyTrashBtn" class="ghost-btn danger hidden">ล้างถังขยะ (ลบถาวรทั้งหมด)</button>
+        </div>
+      </section>
+
+      <section class="settings-card">
         <h3>ซิงค์ / สำรองข้อมูลออนไลน์ (อัตโนมัติ)</h3>
         <p class="muted">สำรองขึ้น Google Drive ของคุณเองผ่าน Apps Script เมื่อตั้งค่าแล้ว แอพจะ
         <b>ซิงค์ให้เองอัตโนมัติ</b> — ทั้งตอนแก้ข้อมูล, ตอนเปิดแอพ, ตอนสลับกลับมาที่แท็บ และทุก ๆ 15 วินาที

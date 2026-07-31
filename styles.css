@@ -485,6 +485,23 @@ h1, h2, h3 { margin: 0; }
 }
 .seg button.active { background: var(--accent); color: #fff; }
 
+/* ---------- Trash ---------- */
+.trash-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.trash-main { flex: 1; min-width: 0; }
+.trash-title { font-size: 0.9rem; }
+.trash-sub { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+.trash-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.trash-actions .ghost-btn { padding: 6px 10px; font-size: 0.8rem; }
+
 /* ---------- Modal 2-column fields ---------- */
 .field-2col { display: flex; gap: 12px; }
 .field-2col label { flex: 1; min-width: 0; }
